@@ -6,7 +6,7 @@
 `dtabnk` is a CLI tool to **convert World Bank OpenData CSV/Excel files to panel datasets** in STATA, SPSS, and/or R formats. It is compatible with the default DataBank layout.
 
 ## Features
-- Converts `.csv`/`.xlsx`/`.xls` files to STATA `.dta`, SPSS/PSPP `.sav`, and/or R `.RData` panel datasets.
+- Converts `.csv`/`.xlsx`/`.xls` files to STATA `.dta` (default), SPSS/PSPP `.sav`, and/or R `.RData` panel datasets.
 - Allows custom entity (`--id`) and time (`--time`) variables.
 - Quiet mode and file overwrite handling
 - Preview output(s) directly in the console.
@@ -55,24 +55,24 @@ dtabnk data.csv --id Region --time Period
 dtabnk data.csv --preview
 ```
 ## Installation
-`dtabnk` is a Python 3 script that can also be installed on Unix-like operating systems using the `INSTALL.sh` script.
-Run:
+`dtabnk.py` can be executed directly on any system with Python 3 installed. It can also be installed or uninstalled on Unix-like operating systems using the appropriate `.sh` scripts.
 ```bash
-git clone https://github.com/cbstatsoft/dtabnk
-cd dtabnk
-./dtabank.py
-```
-Feel free to remove the `.py` file extension it's just there for Windows users.
+git clone https://github.com/cbstatsoft/dtabnk.git
+chmod a+x ./dtabnk/INSTALL.sh
+./dtabnk/INSTALL.sh
 
-Install:
+chmod a+x ./dtabnk/UNINSTALL.sh
+./dtabnk/UNINSTALL.sh
+```
+`dtabnk.py` can be executed directly without invoking `python`/`python3` as the interpreter and can be placed anywhere on your system.
 ```bash
-git clone https://github.com/cbstatsoft/dtabnk
+git clone https://github.com/cbstatsoft/dtabnk.git
 cd dtabnk
-sudo ./INSTALL.sh
+mv dtabnk.py dtabnk
+chmod a+x dtabnk
+./dtabnk
 ```
-
-
-## Dependencies (Bundled in `.exe`)
+## Dependencies
 - ≥Python 3.6
 - colorama
 - pandas
@@ -84,7 +84,5 @@ This program is free software: you can redistribute it and/or modify it under th
 You should have received a copy of the GNU Lesser General Public License along with this program. If not, see <https://www.gnu.org/licenses/lgpl-3.0.txt>.
 
 Copyright (C) 2025 Connor Baird
-
-
 
 
