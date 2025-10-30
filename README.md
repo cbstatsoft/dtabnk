@@ -55,7 +55,7 @@ dtabnk data.csv --id Region --time Period
 dtabnk data.csv --preview
 ```
 ## Installation
-`dtabnk.py` can be executed directly on any system with Python 3 installed. It can also be installed or uninstalled on Unix-like operating systems using the appropriate `.sh` scripts.
+`dtabnk.py` can run on any system with Python 3 installed. It can also be installed or uninstalled on Unix-like operating systems using the appropriate `.sh` scripts.
 ```bash
 git clone https://github.com/cbstatsoft/dtabnk.git
 chmod a+x ./dtabnk/INSTALL.sh
