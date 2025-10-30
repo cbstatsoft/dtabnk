@@ -28,7 +28,7 @@ The following run options are available for `dtabnk`:
 | `--license`       | Display software license information.                                                                  |
 | `--quiet`         | Suppress command output to the terminal.                                                   |
 | `--overwrite`     | Overwrite existing file(s) without prompting for confirmation.                                               |
-| `--preview`       | Print the first 5 lines of the output file(s) to stdout (for previewing output).                            |
+| `--preview`       | Print the first 5 lines of the output file(s) to stdout.                            |
 
 ### Example Usage:
 
