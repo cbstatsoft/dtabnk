@@ -58,7 +58,7 @@ dtabnk data.csv --preview
 `dtabnk` is a Python 3 script that can also be installed on Unix-like operating systems using the `INSTALL.sh` script.
 Run:
 ```bash
-git clone []
+git clone https://github.com/cbstatsoft/dtabnk
 cd dtabnk
 ./dtabank.py
 ```
@@ -66,7 +66,7 @@ Feel free to remove the `.py` file extension it's just there for Windows users.
 
 Install:
 ```bash
-git clone []```
+git clone https://github.com/cbstatsoft/dtabnk
 cd dtabnk
 sudo ./INSTALL.sh
 ```
