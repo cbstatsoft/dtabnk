@@ -28,6 +28,7 @@ import sys
 import os
 import argparse
 
+
 # Dependency check
 def install_package(package_name):
     print(f"Installing {package_name}...")
@@ -53,6 +54,8 @@ def check_and_install_packages():
         if input("Install now? (Y/n): ").strip().lower() or "y" == "y":
             for pkg in missing:
                 install_package(pkg)
+
+
 check_and_install_packages()
 
 import pandas as pd
@@ -95,8 +98,6 @@ def print_err(msg, quiet=False):
 def print_ok(msg, quiet=False):
     if not quiet:
         print(f"{COLOUR_OK}{msg}{COLOUR_RESET}")
-
-
 
 
 # Column name sanitiser
@@ -217,8 +218,12 @@ def sanitise_filename(filename, max_length=255, quiet=False):
 
 def confirm_overwrite(output_file, quiet=False, overwrite=False):
     if os.path.exists(output_file) and not overwrite:
-        user_input = input(f"The file {output_file} exists. Overwrite? (Y/n): ").strip().lower()
-        return quiet or user_input != "n"  # Return True if input is anything other than "n" (no)
+        user_input = (
+            input(f"The file {output_file} exists. Overwrite? (Y/n): ").strip().lower()
+        )
+        return (
+            quiet or user_input != "n"
+        )  # Return True if input is anything other than "n" (no)
     return True
 
 
@@ -322,7 +327,7 @@ def preview_file(file_path, num_rows=5):
                 print_ok(f"Preview of {file_path}:")
                 print(df.head(num_rows))
             else:
-                print_err(f"Error: Failed to read .dta file properly: {file_path}")
+                print_err(f"Failed to read .dta file properly: {file_path}")
                 df = None
 
         # Check for .sav (SPSS) file
@@ -333,7 +338,7 @@ def preview_file(file_path, num_rows=5):
                 print_ok(f"Preview of {file_path}:")
                 print(df.head(num_rows))
             else:
-                print_err(f"Error: Failed to read .sav file properly: {file_path}")
+                print_err(f"Failed to read .sav file properly: {file_path}")
                 df = None
 
         # Check for .RData file
@@ -348,7 +353,7 @@ def preview_file(file_path, num_rows=5):
                 try:
                     df = pandas2ri.rpy2py(r_obj)
                 except Exception as e:
-                    print_err(f"Error converting R object to pandas DataFrame: {e}")
+                    print_err(f"Converting R object to pandas DataFrame: {e}")
                     df = None
 
             # If the conversion was successful and it's a DataFrame, show the preview
@@ -367,7 +372,7 @@ def preview_file(file_path, num_rows=5):
         return df  # Return the DataFrame (or None if it couldn't be loaded)
 
     except Exception as e:
-        print_err(f"Error previewing file {file_path}: {e}")
+        print_err(f"previewing file {file_path}: {e}")
 
 
 # CLI
@@ -375,22 +380,27 @@ def main():
     parser = argparse.ArgumentParser(
         description="Convert World Bank OpenData CSV/Excel to panel dataset in STATA (default), SPSS and/or R format(s). Compatible with default DataBank layout."
     )
-    parser.add_argument("input_file", nargs="?", help="Input CSV/Excel file")
+    # Modify input_file to accept multiple files
+    parser.add_argument(
+        "input_files", nargs="*", help="Input CSV/Excel file(s)"
+    )
     parser.add_argument("--sav", action="store_true", help="Output SPSS/PSPP .sav file")
     parser.add_argument("--rdata", action="store_true", help="Output R .RData file")
     parser.add_argument("--all", action="store_true", help="Output all formats")
     parser.add_argument(
-        "--out", help="Specify output filename (default: input_filename)"
+        "--out",
+        nargs="*",
+        help="Specify output filename(s)",
     )
     parser.add_argument(
         "--id",
         default="Country",
-        help="Specify entity (default: Country; 'Country Name' converted to default)",
+        help="Specify entity (default: Country; 'Country Name' changed to 'Country' automatically)",
     )
     parser.add_argument(
         "--time",
         default="Year",
-        help="Specify time variable (default: Year; Numerical year scraped from variable)",
+        help="Specify time variable (default: Year; Letters etc. removed from variable)",
     )
     parser.add_argument(
         "--stata",
@@ -420,8 +430,15 @@ def main():
         print(__doc__) if not quiet else None
         return
 
-    if not args.input_file:
+    if not args.input_files:
         parser.print_help()
+        return
+
+    # Check if the number of --out files matches the number of input files
+    if args.out and len(args.out) != len(args.input_files):
+        print_err(
+            "The number of --out filenames must match the number of input files."
+        )
         return
 
     # Formats check
@@ -436,32 +453,42 @@ def main():
         if not formats:
             formats.append("dta")  # Default to STATA format if no other is specified
 
-    # Convert the dataframe to the appropriate format
-    df = convert_dataframe(
-        args.input_file, id_var=args.id, time_var=args.time, quiet=quiet
-    )
-    base = args.out if args.out else os.path.splitext(args.input_file)[0]
+    # Loop over all input files
+    for i, input_file in enumerate(args.input_files):
+        print_ok(f"Processing file: {input_file}", quiet)
 
-    if "dta" in formats:
-        convert_to_stata(
-            df,
-            f"{base}.dta",
-            id_var=args.id,
-            time_var=args.time,
-            stata_version=args.stata,
-            quiet=quiet,
-            overwrite=overwrite,
+        # Check if a custom output filename is provided, otherwise use input file's base name
+        base = args.out[i] if args.out else os.path.splitext(input_file)[0]
+
+        # Convert the dataframe to the appropriate format
+        df = convert_dataframe(
+            input_file, id_var=args.id, time_var=args.time, quiet=quiet
         )
-        if args.preview:
-            preview_file(f"{base}.dta")
-    if "sav" in formats:
-        convert_to_spss(df, f"{base}.sav", quiet=quiet, overwrite=overwrite)
-        if args.preview:
-            preview_file(f"{base}.sav")
-    if "rdata" in formats:
-        convert_to_rdata(df, f"{base}.RData", quiet=quiet, overwrite=overwrite)
-        if args.preview:
-            preview_file(f"{base}.RData")
+
+        if "dta" in formats:
+            convert_to_stata(
+                df,
+                f"{base}.dta",
+                id_var=args.id,
+                time_var=args.time,
+                stata_version=args.stata,
+                quiet=quiet,
+                overwrite=overwrite,
+            )
+            if args.preview:
+                preview_file(f"{base}.dta")
+
+        if "sav" in formats:
+            convert_to_spss(df, f"{base}.sav", quiet=quiet, overwrite=overwrite)
+            if args.preview:
+                preview_file(f"{base}.sav")
+
+        if "rdata" in formats:
+            convert_to_rdata(df, f"{base}.RData", quiet=quiet, overwrite=overwrite)
+            if args.preview:
+                preview_file(f"{base}.RData")
+
+    print_ok("All files processed.", quiet)
 
 
 if __name__ == "__main__":
