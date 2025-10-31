@@ -7,7 +7,7 @@
 
 ## Features
 - Converts `.csv`/`.xlsx`/`.xls` files to STATA `.dta` (default), SPSS/PSPP `.sav`, and/or R `.RData` panel datasets.
-- Generates a new column in .dta files with entity ID numbers, as STATA does not support using strings as entity names.
+- Generates a new column in `.dta` files with entity ID numbers, as STATA does not support using strings as entity names.
 - Allows custom entity (`--id`) and time (`--time`) variables.
 - Quiet mode and file overwrite handling
 - Preview output files(s) directly in the console.
