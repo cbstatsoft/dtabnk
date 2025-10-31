@@ -67,7 +67,7 @@ chmod a+x ./dtabnk/install.sh
 chmod a+x ./dtabnk/uninstall.sh
 ./dtabnk/uninstall.sh
 ```
-`dtabnk.py` can be executed directly on Unix-like systems without invoking `python`/`python3` as the interpreter.
+`dtabnk.py` can be executed directly on Unix-like operating systems without invoking `python`/`python3` as the interpreter.
 ```bash
 git clone https://github.com/cbstatsoft/dtabnk.git
 cd dtabnk
