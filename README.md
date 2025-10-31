@@ -22,7 +22,7 @@ The following run options are available for `dtabnk`:
 | `--sav`           | Output SPSS/PSPP `.sav` file.                                                                               |
 | `--rdata`         | Output R `.RData` file.                                                                                     |
 | `--all`           | Output all available formats (STATA, SPSS, R).                                                              |
-| `--out`       | Specify the output filename (default: input filename).                                                      |
+| `--out`       | Specify the output filename(s) (default: input filename).                                                      |
 | `--id`         | Specify the entity (default: `Country`).<br>DataBank 'Country Name' converted to 'Country' automatically.                 |
 | `--time`     | Specify the time variable (default: `Year`).<br>Letters etc. removed automatically.                 |
 | `--stata`   | Specify STATA version `.dta` output (8–15; default: 15).<br>STATA can read `.dta` files prepared for older versions. |
@@ -37,8 +37,11 @@ The following run options are available for `dtabnk`:
 # display help information
 dtabnk (--help)
 
-convert to STATA 15+ .dta format
+# convert to STATA 15+ .dta format
 dtabnk data.csv
+
+convert data.csv and data.xlsx to data1.dta and data2.dta respectively
+dtabnk data.csv data.xlsx --out data1 data2
 
 # convert to SPSS/PSPP and R formats
 dtabnk data.csv --sav --rdata
