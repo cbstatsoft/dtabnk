@@ -9,7 +9,7 @@
 - Converts `.csv`/`.xlsx`/`.xls` files to STATA `.dta` (default), SPSS/PSPP `.sav`, and/or R `.RData` panel datasets.
 - Generates a new column in `.dta` files with entity ID numbers, as STATA does not support using strings as entity names.
 - Allows custom entity (`--id`) and time (`--time`) variables.
-- Quiet mode and file overwrite handling
+- Duplicate output filename handling via autorename or overwrite.
 - Preview output files(s) directly in the console.
 - Dependencies can be automatically installed by dtabnk if `pip` is installed
 ## Command-Line Options
@@ -40,8 +40,11 @@ dtabnk (--help)
 # convert to STATA 15+ .dta format
 dtabnk data.csv
 
-# convert data.csv and data.xlsx to data1.dta and data2.dta respectively
+# convert data.csv and data.xlsx to foo.dta and bar.dta respectively
 dtabnk data.csv data.xlsx --out data1 data2
+
+# convert data.csv and data.xlsx to STATA 15+ .dta format, dtabnk will ask if you wish to overwrite, rename to data_1, or skip data.xlsx (O/R/S)
+dtabnk data.csv data.xlsx
 
 # convert to SPSS/PSPP and R formats
 dtabnk data.csv --sav --rdata

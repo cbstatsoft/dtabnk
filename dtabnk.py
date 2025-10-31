@@ -375,15 +375,45 @@ def preview_file(file_path, num_rows=5):
         print_err(f"previewing file {file_path}: {e}")
 
 
+def confirm_overwrite_or_rename(output_file, quiet=False, overwrite=False):
+    if os.path.exists(output_file) and not overwrite:
+        user_input = (
+            input(
+                f"The file {output_file} exists. Do you want to (O)verwrite, (R)ename, or (S)kip? (O/R/S): "
+            )
+            .strip()
+            .lower()
+        )
+
+        if user_input == "o":
+            return True  # User chose to overwrite
+        elif user_input == "r":
+            # Ask for new name or automatically rename by appending a suffix
+            base, ext = os.path.splitext(output_file)
+            counter = 1
+            new_file = f"{base}_{counter}{ext}"
+            while os.path.exists(new_file):
+                counter += 1
+                new_file = f"{base}_{counter}{ext}"
+
+            print(f"Renaming to {new_file}")
+            return new_file  # Return the new filename with suffix
+        elif user_input == "s":
+            print(f"Skipping {output_file}")
+            return None  # User chose to skip, return None
+        else:
+            print(f"Invalid choice. Skipping {output_file}")
+            return None  # Invalid input, skipping
+    return True  # No conflict, proceed as normal
+
+
 # CLI
 def main():
     parser = argparse.ArgumentParser(
         description="Convert World Bank OpenData CSV/Excel to panel dataset in STATA (default), SPSS and/or R format(s). Compatible with default DataBank layout."
     )
     # Modify input_file to accept multiple files
-    parser.add_argument(
-        "input_files", nargs="*", help="Input CSV/Excel file(s)"
-    )
+    parser.add_argument("input_files", nargs="*", help="Input CSV/Excel file(s)")
     parser.add_argument("--sav", action="store_true", help="Output SPSS/PSPP .sav file")
     parser.add_argument("--rdata", action="store_true", help="Output R .RData file")
     parser.add_argument("--all", action="store_true", help="Output all formats")
@@ -436,9 +466,7 @@ def main():
 
     # Check if the number of --out files matches the number of input files
     if args.out and len(args.out) != len(args.input_files):
-        print_err(
-            "The number of --out filenames must match the number of input files."
-        )
+        print_err("The number of --out filenames must match the number of input files.")
         return
 
     # Formats check
@@ -466,27 +494,65 @@ def main():
         )
 
         if "dta" in formats:
-            convert_to_stata(
-                df,
-                f"{base}.dta",
-                id_var=args.id,
-                time_var=args.time,
-                stata_version=args.stata,
-                quiet=quiet,
-                overwrite=overwrite,
+            output_file = f"{base}.dta"
+            result = confirm_overwrite_or_rename(
+                output_file, quiet=quiet, overwrite=overwrite
             )
-            if args.preview:
-                preview_file(f"{base}.dta")
+            if result is True:
+                convert_to_stata(
+                    df,
+                    output_file,
+                    id_var=args.id,
+                    time_var=args.time,
+                    stata_version=args.stata,
+                    quiet=quiet,
+                    overwrite=overwrite,
+                )
+                if args.preview:
+                    preview_file(output_file)
+            elif result is not None:
+                # The file was renamed
+                convert_to_stata(
+                    df,
+                    result,
+                    id_var=args.id,
+                    time_var=args.time,
+                    stata_version=args.stata,
+                    quiet=quiet,
+                    overwrite=overwrite,
+                )
+                if args.preview:
+                    preview_file(result)
 
         if "sav" in formats:
-            convert_to_spss(df, f"{base}.sav", quiet=quiet, overwrite=overwrite)
-            if args.preview:
-                preview_file(f"{base}.sav")
+            output_file = f"{base}.sav"
+            result = confirm_overwrite_or_rename(
+                output_file, quiet=quiet, overwrite=overwrite
+            )
+            if result is True:
+                convert_to_spss(df, output_file, quiet=quiet, overwrite=overwrite)
+                if args.preview:
+                    preview_file(output_file)
+            elif result is not None:
+                # The file was renamed
+                convert_to_spss(df, result, quiet=quiet, overwrite=overwrite)
+                if args.preview:
+                    preview_file(result)
 
         if "rdata" in formats:
-            convert_to_rdata(df, f"{base}.RData", quiet=quiet, overwrite=overwrite)
-            if args.preview:
-                preview_file(f"{base}.RData")
+            output_file = f"{base}.RData"
+            result = confirm_overwrite_or_rename(
+                output_file, quiet=quiet, overwrite=overwrite
+            )
+            if result is True:
+                convert_to_rdata(df, output_file, quiet=quiet, overwrite=overwrite)
+                if args.preview:
+                    preview_file(output_file)
+            elif result is not None:
+                # The file was renamed
+                convert_to_rdata(df, result, quiet=quiet, overwrite=overwrite)
+                if args.preview:
+                    preview_file(result)
 
     print_ok("All files processed.", quiet)
 
