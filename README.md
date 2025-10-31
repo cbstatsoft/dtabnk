@@ -3,13 +3,14 @@
 
 [![Python Version](https://img.shields.io/badge/python-3.6%2B-blue.svg)](https://www.python.org/downloads/release/python-360/)  [![License](https://img.shields.io/badge/license-LGPL%20v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0.txt)  
 
-`dtabnk` is a CLI tool to **convert World Bank OpenData CSV/Excel files to panel datasets** in STATA, SPSS, and/or R formats. It is compatible with the default DataBank layout.
+`dtabnk` is a CLI tool to **convert World Bank OpenData CSV/Excel files to panel datasets** in STATA (default), SPSS, and/or R formats. It is compatible with the default DataBank layout.
 
 ## Features
 - Converts `.csv`/`.xlsx`/`.xls` files to STATA `.dta` (default), SPSS/PSPP `.sav`, and/or R `.RData` panel datasets.
+- Assigns ID numbers to entities and  creates a new column for them, as STATA doesn't support using strings as entity names.
 - Allows custom entity (`--id`) and time (`--time`) variables.
 - Quiet mode and file overwrite handling
-- Preview output(s) directly in the console.
+- Preview output files(s) directly in the console.
 - Dependencies can be automatically installed by dtabnk if `pip` is installed
 ## Command-Line Options
 
@@ -58,7 +59,7 @@ dtabnk data.csv --id region --time period
 dtabnk data.csv --preview
 ```
 ## Installation
-`dtabnk.py` can run on any system with Python 3 installed. it can also be installed and uninstalled on Unix-like operating systems using the appropriate `.sh` scripts.
+`dtabnk.py` can run on any system with Python 3 installed. It can also be installed and uninstalled on Unix-like operating systems using the appropriate `.sh` scripts.
 ```bash
 git clone https://github.com/cbstatsoft/dtabnk.git
 chmod a+x ./dtabnk/install.sh
