@@ -67,7 +67,7 @@ chmod a+x ./dtabnk/install.sh
 chmod a+x ./dtabnk/uninstall.sh
 ./dtabnk/uninstall.sh
 ```
-`dtabnk.py` can be executed directly on unix-like systems without invoking `python`/`python3` as the interpreter and can be placed anywhere on your system.
+`dtabnk.py` can be executed directly on unix-like systems without invoking `python`/`python3` as the interpreter.
 ```bash
 git clone https://github.com/cbstatsoft/dtabnk.git
 cd dtabnk
@@ -87,5 +87,3 @@ This program is free software: you can redistribute it and/or modify it under th
 You should have received a copy of the GNU Lesser General Public License along with this program. If not, see <https://www.gnu.org/licenses/lgpl-3.0.txt>.
 
 Copyright (C) 2025 Connor Baird
-
-
