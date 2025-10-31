@@ -40,7 +40,7 @@ dtabnk (--help)
 # convert to STATA 15+ .dta format
 dtabnk data.csv
 
-convert data.csv and data.xlsx to data1.dta and data2.dta respectively
+# convert data.csv and data.xlsx to data1.dta and data2.dta respectively
 dtabnk data.csv data.xlsx --out data1 data2
 
 # convert to SPSS/PSPP and R formats
