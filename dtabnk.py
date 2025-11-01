@@ -216,18 +216,9 @@ def sanitise_filename(filename, max_length=255, quiet=False):
     return basename + ext
 
 
-def confirm_overwrite(output_file, quiet=False, overwrite=False):
-    if os.path.exists(output_file) and not overwrite:
-        user_input = (
-            input(f"The file {output_file} exists. Overwrite? (Y/n): ").strip().lower()
-        )
-        return (
-            quiet or user_input != "n"
-        )  # Return True if input is anything other than "n" (no)
-    return True
-
-
 # Conversion functions
+
+
 def convert_to_stata(
     df,
     output_file,
@@ -240,43 +231,45 @@ def convert_to_stata(
     output_file = sanitise_filename(output_file, quiet=quiet)
     if not output_file.endswith(".dta"):
         output_file += ".dta"
-    if confirm_overwrite(output_file, quiet, overwrite):
-        try:
-            df_to_save = df.copy()
-            if not pd.api.types.is_numeric_dtype(df_to_save[id_var]):
-                df_to_save["ID"] = df_to_save[id_var].astype("category").cat.codes + 1
-            else:
-                df_to_save["ID"] = df_to_save[id_var]
-            pyreadstat.write_dta(df_to_save, output_file, version=stata_version)
-            print_ok(f"STATA {stata_version}+ .dta file written: {output_file}", quiet)
-        except Exception as e:
-            print_err(f"STATA file write failed: {e}", quiet)
+
+    try:
+        df_to_save = df.copy()
+        if not pd.api.types.is_numeric_dtype(df_to_save[id_var]):
+            df_to_save["ID"] = df_to_save[id_var].astype("category").cat.codes + 1
+        else:
+            df_to_save["ID"] = df_to_save[id_var]
+
+        pyreadstat.write_dta(df_to_save, output_file, version=stata_version)
+        print_ok(f"STATA {stata_version}+ .dta file written: {output_file}", quiet)
+
+    except Exception as e:
+        print_err(f"STATA file write failed: {e}", quiet)
 
 
 def convert_to_spss(df, output_file, quiet=False, overwrite=False):
     output_file = sanitise_filename(output_file, quiet=quiet)
     if not output_file.endswith(".sav"):
         output_file += ".sav"
-    if confirm_overwrite(output_file, quiet, overwrite):
-        try:
-            pyreadstat.write_sav(df, output_file)
-            print_ok(f"SPSS/PSPP .sav file written: {output_file}", quiet)
-        except Exception as e:
-            print_err(f"SPSS/PSPP write failed: {e}", quiet)
+
+    try:
+        pyreadstat.write_sav(df, output_file)
+        print_ok(f"SPSS/PSPP .sav file written: {output_file}", quiet)
+    except Exception as e:
+        print_err(f"SPSS/PSPP write failed: {e}", quiet)
 
 
 def convert_to_rdata(df, output_file, quiet=False, overwrite=False):
     output_file = sanitise_filename(output_file, quiet=quiet)
     if not output_file.endswith(".RData"):
         output_file += ".RData"
-    if confirm_overwrite(output_file, quiet, overwrite):
-        try:
-            with localconverter(ro.default_converter + pandas2ri.converter):
-                ro.globalenv["df"] = df
-            r(f"save(df, file='{output_file}')")
-            print_ok(f"R .RData file written: {output_file}", quiet)
-        except Exception as e:
-            print_err(f"RData write failed: {e}", quiet)
+
+    try:
+        with localconverter(ro.default_converter + pandas2ri.converter):
+            ro.globalenv["df"] = df
+        r(f"save(df, file='{output_file}')")
+        print_ok(f"R .RData file written: {output_file}", quiet)
+    except Exception as e:
+        print_err(f"RData write failed: {e}", quiet)
 
 
 # Data preparation
