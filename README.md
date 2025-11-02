@@ -1,7 +1,7 @@
 
 # dtabnk
 
-[![Python Version](https://img.shields.io/badge/python-3.6%2B-blue.svg)](https://www.python.org/downloads/release/python-360/)  [![License](https://img.shields.io/badge/license-LGPL%20v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0.txt)  
+[![Python Version](https://img.shields.io/badge/python-3.7.17%2B-blue.svg)](https://www.python.org/downloads/release/python-3717/)  [![License](https://img.shields.io/badge/license-LGPL%20v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0.html)  
 
 `dtabnk` is a CLI tool to **convert World Bank OpenData CSV/Excel files to panel datasets** in STATA (default), SPSS, and/or R formats. It is compatible with the default DataBank layout.
 
@@ -35,13 +35,13 @@ The following run options are available for `dtabnk`:
 
 ```bash
 # display help information
-dtabnk (--help)
+dtabnk
 
 # convert to STATA 15+ .dta format
 dtabnk data.csv
 
-# convert data.csv and data.xlsx to foo.dta and bar.dta respectively
-dtabnk data.csv data.xlsx --out data1 data2
+# convert data.csv and data.xlsx to spam.dta and eggs.dta respectively
+dtabnk data.csv data.xlsx --out spam eggs
 
 # convert data.csv and data.xlsx to STATA 15+ .dta format, dtabnk will ask if you wish to overwrite, rename to data_1, or skip data.xlsx (O/R/S)
 dtabnk data.csv data.xlsx
@@ -83,8 +83,9 @@ chmod a+x dtabnk
 ./dtabnk
 ```
 ## Dependencies
-- ≥Python 3.6
+- ≥Python 3.17.7 (This is the earliest version I have personally tested that worked)
 - [colorama](https://github.com/tartley/colorama)   BSD 3-Clause License
+- [openpyxl](https://github.com/shshe/openpyxl)	    MIT License
 - [pandas](https://github.com/pandas-dev/pandas)    BSD 3-Clause License
 - [pyreadstat](https://github.com/Roche/pyreadstat) Apache License Version 2
 - [rpy2](https://github.com/rpy2/rpy2)              GNU General Public License Version 2

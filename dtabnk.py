@@ -18,6 +18,7 @@ Copyright (C) 2025 Connor Baird
 
 Used Libraries:
     colorama <https://github.com/tartley/colorama>: BSD 3-Clause License
+    openpyxl <https://github.com/shshe/openpyxl> MIT License
     pandas <https://github.com/pandas-dev/pandas>: BSD 3-Clause License
     pyreadstat <https://github.com/Roche/pyreadstat>: Apache License Version 2
     rpy2 <https://github.com/rpy2/rpy2>: GNU General Public License Version 2
@@ -40,7 +41,7 @@ def install_package(package_name):
 
 
 def check_and_install_packages():
-    required = ["pandas", "pyreadstat", "rpy2", "colorama"]
+    required = ["pandas", "pyreadstat", "rpy2", "colorama", "openpyxl"]
     missing = []
 
     for pkg in required:
@@ -58,6 +59,7 @@ def check_and_install_packages():
 
 check_and_install_packages()
 
+import openpyxl
 import pandas as pd
 import pyreadstat
 import rpy2.robjects as ro
