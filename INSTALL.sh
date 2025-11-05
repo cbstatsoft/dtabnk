@@ -6,6 +6,7 @@
 set -eu
 
 SCRIPT_NAME="dtabnk.py"
+SCRIPT_BASE="${SCRIPT_NAME%.py}"
 COMMAND_NAME="dtabnk"
 INSTALL_DIR="/opt/dtabnk"
 WRAPPER_DIR="/usr/local/bin"
@@ -33,7 +34,7 @@ else
         ELEVATE_CMD=""
         printf '%s\n' "No doas/sudo found but running as root; continuing without elevation."
     else
-        printf '%s' "Neither sudo nor doas found. If you will run this as root press Enter; otherwise enter the command to use for privilege escalation (e.g. sudo): "
+        printf '%s' "Neither sudo nor doas found. If you will run this as root press Enter; otherwise enter the command to use for privilege escalation: "
         # POSIX read
         if ! IFS= read -r user_cmd; then
             printf '%s\n' "Input error; aborting."
@@ -82,10 +83,10 @@ fi
 
 # copy python script
 printf '%s\n' "Installing $SCRIPT_NAME to $INSTALL_DIR..."
-run_elev cp "$SCRIPT_NAME" "$INSTALL_DIR/"
+run_elev cp "$SCRIPT_NAME" "$INSTALL_DIR/$SCRIPT_BASE"
 
 # make executable
-run_elev chmod +x "$INSTALL_DIR/$(basename "$SCRIPT_NAME")"
+run_elev chmod +x "$INSTALL_DIR/$(basename "$SCRIPT_BASE")"
 
 # ensure wrapper dir exists
 if ! run_elev test -d "$WRAPPER_DIR"; then
@@ -105,7 +106,7 @@ fi
 # write wrapper (use /bin/sh for portability)
 cat > "$TMP_WRAPPER" <<EOF
 #!/bin/sh
-exec $PYTHON_CMD $INSTALL_DIR/$(basename "$SCRIPT_NAME") "\$@"
+exec $INSTALL_DIR/$(basename "$SCRIPT_BASE") "\$@"
 EOF
 
 chmod +x "$TMP_WRAPPER"
