@@ -27,7 +27,7 @@ The following run options are available for `dtabnk`:
 | `--time`     | Specify the time variable (default: `Year`).<br>Letters etc. removed automatically.                 |
 | `--stata`   | Specify STATA version `.dta` output (8–15; default: 15).<br>STATA can read `.dta` files prepared for older versions. |
 | `--license`       | Print software license information in stdout.                                                                  |
-| `--quiet`         | Suppress command outputs in the terminal unless user input required.                                                   |
+| `--quiet`         | Suppress command outputs in the terminal unless user input is required.                                                   |
 | `--overwrite`     | Overwrite existing file(s) without prompting for confirmation.                                               |
 | `--preview`       | Print the first 5 lines of the output file(s) in stdout.                            |
 
