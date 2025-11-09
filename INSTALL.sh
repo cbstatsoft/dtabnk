@@ -120,5 +120,5 @@ if [ -f "$TMP_WRAPPER" ]; then
     rm -f "$TMP_WRAPPER"
 fi
 
-printf '%s\n' "$SCRIPT_NAME has been installed to $INSTALL_DIR and can now be executed as '$COMMAND_NAME'."
+printf '%s\n' "$SCRIPT_BASE has been installed to $INSTALL_DIR and can now be executed as '$COMMAND_NAME'."
 exit 0
