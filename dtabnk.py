@@ -438,7 +438,7 @@ def main():
         action="store_true",
         help="This software's license information",
     )
-    parser.add_argument("--quiet", action="store_true", help="Suppress stdout")
+    parser.add_argument("--quiet", action="store_true", help="Suppress stdout unless user input required")
     parser.add_argument(
         "--overwrite", action="store_true", help="Overwrite file(s) without prompting"
     )
