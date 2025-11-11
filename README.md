@@ -20,21 +20,21 @@ The following run options are available for `dtabnk`:
 
 | Flag              | Description                                                                                                 |
 |-------------------|-------------------------------------------------------------------------------------------------------------|
-| `-h, --help`      | Show help message and exit.                                                                             |
+| `-h, --help`      | Show help message and exit.                                                                                 |
 | `--sav`           | Output SPSS/PSPP `.sav` file.                                                                               |
 | `--rdata`         | Output R `.RData` file.                                                                                     |
 | `--all`           | Output all available formats (STATA, SPSS, R).                                                              |
-| `--out`       | Specify the output filename(s) (default: input filename).                                                      |
-| `--id`         | Specify the entity (default: `Country`).<br>DataBank 'Country Name' converted to 'Country' automatically.                 |
-| `--time`     | Specify the time variable (default: `Year`).<br>Letters etc. removed automatically.                 |
-| `--stata`   | Specify STATA version `.dta` output (8–15; default: 15).<br>STATA can read `.dta` files prepared for older versions. |
-| `--license`       | Print software license information in stdout.                                                                  |
-| `--quiet`         | Suppress command outputs in the terminal unless user input is required.                                                   |
-| `--overwrite`     | Overwrite existing file(s) without prompting for confirmation.                                               |
-| `--preview`       | Print the first 5 lines of the output file(s) in stdout.                            |
-| `--hausman`       | Perform a Hausman test between fixed and random effects on input file(s). If dependent variable not specified will perform test on all numerical variables. |
-| `--dep`           | Specify post-sanitised dependent variable name for Hausman test. |
-| `--indep`         | Specify post-sanitised independent variable name(s) for Hausman test |
+| `--out    `       | Specify the output filename(s) (default: input filename).                                                   |
+| `--id`            | Specify the entity (default: `Country`).<br>DataBank 'Country Name' converted to 'Country' automatically.   |
+| `--time`          | Specify the time variable (default: `Year`).<br>Letters etc. removed automatically.                         |
+| `--stata`         | Specify STATA version `.dta` output (8–15; default: 15).<br>STATA can read `.dta` files prepared for older versions.|
+| `--license`       | Print software license information in stdout.                                                               |
+| `--quiet`         | Suppress command outputs in the terminal unless user input is required.                                     |
+| `--overwrite`     | Overwrite existing file(s) without prompting for confirmation.                                              |
+| `--preview`       | Print the first 5 lines of the output file(s) in stdout.                                                    |
+| `--hausman`       | Perform a Hausman test between fixed and random effects on variables(s).                                   |
+| `--dep`           | Specify post-sanitised dependent variable name for Hausman test.                                            |
+| `--indep`         | Specify post-sanitised independent variable name(s) for Hausman test                                        |
 
 ### Example usage:
 

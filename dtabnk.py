@@ -517,11 +517,9 @@ def main():
     )
     parser.add_argument(
         "--hausman",
-        nargs="?",
-        const=True,
+        action='store_true',
         help=(
-            "Perform a Hausman test between fixed and random effects on input file(s). "
-            "If dependent variable not specified will perform test on all numerical variables."
+            "Perform a Hausman test between fixed and random effects on variable(s)"
         ),
     )
     parser.add_argument(
