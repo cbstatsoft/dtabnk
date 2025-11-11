@@ -10,7 +10,7 @@
 - Generates a new column in `.dta` files with entity ID numbers, as STATA does not support using strings as entity names.
 - Sanitises variable names (e.g. 'US$' → 'USD', '%' → 'pct', ' ' → '_').
 - Allows custom entity (`--id`) and time (`--time`) variables.
-- Perform a Hausman test between fixed and random effects on input file(s).
+- Perform a Hausman test between fixed and random effects on input file variable(s).
 - Duplicate output filename handling via autorename or overwrite.
 - Preview output files(s) directly in the console.
 - Dependencies can be automatically installed by dtabnk if `pip` is installed
@@ -32,7 +32,7 @@ The following run options are available for `dtabnk`:
 | `--quiet`         | Suppress command outputs in the terminal unless user input is required.                                     |
 | `--overwrite`     | Overwrite existing file(s) without prompting for confirmation.                                              |
 | `--preview`       | Print the first 5 lines of the output file(s) in stdout.                                                    |
-| `--hausman`       | Perform a Hausman test between fixed and random effects on variables(s).                                   |
+| `--hausman`       | Perform a Hausman test between fixed and random effects on variable(s).                                     |
 | `--dep`           | Specify post-sanitised dependent variable name for Hausman test.                                            |
 | `--indep`         | Specify post-sanitised independent variable name(s) for Hausman test                                        |
 
