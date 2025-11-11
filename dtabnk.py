@@ -526,12 +526,12 @@ def main():
     )
     parser.add_argument(
         "--dep",
-        help="Specify dependent variable for Hausman test"
+        help="Specify post-sanitised dependent variable name for Hausman test"
     )
     parser.add_argument(
         "--indep",
         nargs="+",
-        help="Specify independent variable(s) for Hausman test"
+        help="Specify post-sanitised independent variable name(s) for Hausman test"
     )
 
 

@@ -8,6 +8,7 @@
 ## Features
 - Converts `.csv`/`.xlsx`/`.xls` files to STATA `.dta` (default), SPSS/PSPP `.sav`, and/or R `.RData` panel datasets.
 - Generates a new column in `.dta` files with entity ID numbers, as STATA does not support using strings as entity names.
+- Sanitises variable names (e.g. 'US$' → 'USD', '%' → 'pct', ' ' → '_').
 - Allows custom entity (`--id`) and time (`--time`) variables.
 - Perform a Hausman test between fixed and random effects on input file(s).
 - Duplicate output filename handling via autorename or overwrite.
@@ -32,8 +33,8 @@ The following run options are available for `dtabnk`:
 | `--overwrite`     | Overwrite existing file(s) without prompting for confirmation.                                               |
 | `--preview`       | Print the first 5 lines of the output file(s) in stdout.                            |
 | `--hausman`       | Perform a Hausman test between fixed and random effects on input file(s). If dependent variable not specified will perform test on all numerical variables. |
-| `--dep`           | Specify dependent variable for Hausman test. |
-| `--indep`         | Specify independent variable(s) for Hausman test |
+| `--dep`           | Specify post-sanitised dependent variable name for Hausman test. |
+| `--indep`         | Specify post-sanitised independent variable name(s) for Hausman test |
 
 ### Example usage:
 
@@ -44,7 +45,7 @@ dtabnk
 # convert to STATA 15+ .dta format
 dtabnk data.csv
 
-# convert to STATA 15+ .dta format and perform Hausman test on data.csv using Gini_index (post-sanitised variable name) as the dependent variable and all other variables as the independent variables:
+# convert to STATA 15+ .dta format and perform Hausman test on data.csv using Gini_index as the dependent variable and all other variables as the independent variables:
 dtabnk data.csv --hausman --dep Gini_index
 
 # convert data.csv and data.xlsx to spam.dta and eggs.dta respectively
