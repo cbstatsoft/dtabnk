@@ -18,10 +18,13 @@ Copyright (C) 2025 Connor Baird
 
 Used Libraries:
     colorama <https://github.com/tartley/colorama>: BSD 3-Clause License
-    openpyxl <https://github.com/shshe/openpyxl> MIT License
+    numpy <https://github.com/numpy/numpy>: BSD License
+    openpyxl <https://github.com/shshe/openpyxl>: MIT License
     pandas <https://github.com/pandas-dev/pandas>: BSD 3-Clause License
     pyreadstat <https://github.com/Roche/pyreadstat>: Apache License Version 2
     rpy2 <https://github.com/rpy2/rpy2>: GNU General Public License Version 2
+    statsmodels <https://github.com/statsmodels/statsmodels>: BSD 3-Clause License
+    scipy <https://github.com/scipy/scipy>: BSD 3-Clause License
 """
 
 import subprocess
@@ -41,7 +44,7 @@ def install_package(package_name):
 
 
 def check_and_install_packages():
-    required = ["pandas", "pyreadstat", "rpy2", "colorama", "openpyxl"]
+    required = ["pandas", "pyreadstat", "rpy2", "colorama", "openpyxl", "numpy", "statsmodels", "scipy"]
     missing = []
 
     for pkg in required:
@@ -66,6 +69,9 @@ import rpy2.robjects as ro
 from rpy2.robjects import r
 from rpy2.robjects import pandas2ri
 from rpy2.robjects.conversion import localconverter
+import numpy as np
+import statsmodels.api as sm
+from scipy.stats import chi2
 
 # Colour setup
 try:
@@ -402,6 +408,68 @@ def confirm_overwrite_or_rename(output_file, quiet=False, overwrite=False):
     return True  # No conflict, proceed as normal
 
 
+def hausman_test(df, id_var="Country", time_var="Year", dependent_vars=None, independent_vars=None, quiet=False):
+    if not {id_var, time_var}.issubset(df.columns):
+        raise ValueError(f"Columns '{id_var}' and/or '{time_var}' not found in DataFrame.")
+
+    df = df.set_index([id_var, time_var])
+
+    # Detect dependent variables if not provided
+    if dependent_vars is None:
+        dependent_vars = [
+            c for c in df.select_dtypes(include=[np.number]).columns
+            if c not in [id_var, time_var]
+        ]
+
+    for dep in dependent_vars:
+        # Skip if dependent variable is also an independent variable
+        if independent_vars and dep in independent_vars:
+            print_warn(f"Skipping Hausman test for {dep}: dependent variable identical to independent variable.")
+            continue
+
+        df_sub = df.dropna(subset=[dep])
+
+        # Identify independent variables
+        x_vars = independent_vars if independent_vars else [c for c in df_sub.columns if c != dep]
+
+        if len(x_vars) == 0:
+            print_warn(f"Skipping {dep}: no independent variables available.")
+            continue
+
+        print_ok(f"\nRunning Hausman test for dependent variable: {dep}")
+        print(f"Independent variables used: {x_vars}")
+
+        # Fixed effects (within estimator)
+        df_grouped = df_sub.groupby(level=0)
+        df_fe = df_sub - df_grouped.transform("mean")
+        y_fe = df_fe[dep]
+        X_fe = sm.add_constant(df_fe[x_vars])
+        fe_model = sm.OLS(y_fe, X_fe, missing="drop").fit()
+
+        # Random effects (pooled OLS)
+        y_re = df_sub[dep]
+        X_re = sm.add_constant(df_sub[x_vars])
+        re_model = sm.OLS(y_re, X_re, missing="drop").fit()
+
+        # Hausman statistic
+        diff = fe_model.params - re_model.params
+        cov_diff = fe_model.cov_params() - re_model.cov_params()
+
+        try:
+            H = np.dot(diff.T, np.linalg.inv(cov_diff)).dot(diff)
+            dfree = len(diff)
+            pval = chi2.sf(H, dfree)
+        except np.linalg.LinAlgError:
+            print_err(f"Covariance matrix not invertible for {dep} — test skipped.")
+            continue
+
+        print(f"Hausman statistic = {H:.3f}, df = {dfree}, p = {pval:.4f}")
+        if pval < 0.05:
+            print_ok(f"Fixed effects preferred for {dep} (p < 0.05)")
+        else:
+            print_ok(f"Random effects preferred for {dep} (p ≥ 0.05)")
+
+
 # CLI
 def main():
     parser = argparse.ArgumentParser(
@@ -447,6 +515,27 @@ def main():
         action="store_true",
         help="Print first 5 lines of output file(s) to stdout",
     )
+    parser.add_argument(
+        "--hausman",
+        nargs="?",
+        const=True,
+        help=(
+            "Perform a Hausman test between fixed and random effects on input file(s). "
+            "If dependent variable not specified will perform test on all numerical variables."
+        ),
+    )
+    parser.add_argument(
+        "--dep",
+        help="Specify dependent variable for Hausman test"
+    )
+    parser.add_argument(
+        "--indep",
+        nargs="+",
+        help="Specify independent variable(s) for Hausman test"
+    )
+
+
+    
 
     args = parser.parse_args()
     quiet, overwrite = args.quiet, args.overwrite
@@ -488,6 +577,27 @@ def main():
             input_file, id_var=args.id, time_var=args.time, quiet=quiet
         )
 
+        # Hausman Test
+        if args.hausman:
+            dep_vars = [args.dep] if args.dep else None
+            indep_vars = args.indep if args.indep else None
+
+        # Skip test if independent and dependent variables are identical
+            if indep_vars and dep_vars and any(dep in indep_vars for dep in dep_vars):
+                print_warn("Skipping Hausman test: independent variable identical to dependent variable", quiet)
+            else:
+                try:
+                    hausman_test(
+                        df,
+                        id_var=args.id,
+                        time_var=args.time,
+                        dependent_vars=dep_vars,
+                        independent_vars=indep_vars,
+                        quiet=quiet
+                    )
+                except Exception as e:
+                    print_err(f"Hausman test failed: {e}", quiet)
+    
         if "dta" in formats:
             output_file = f"{base}.dta"
             result = confirm_overwrite_or_rename(
@@ -549,7 +659,7 @@ def main():
                 if args.preview:
                     preview_file(result)
 
-    print_ok("All files processed.", quiet)
+    print_ok("All files processed", quiet)
 
 
 if __name__ == "__main__":

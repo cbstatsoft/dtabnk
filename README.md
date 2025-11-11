@@ -9,6 +9,7 @@
 - Converts `.csv`/`.xlsx`/`.xls` files to STATA `.dta` (default), SPSS/PSPP `.sav`, and/or R `.RData` panel datasets.
 - Generates a new column in `.dta` files with entity ID numbers, as STATA does not support using strings as entity names.
 - Allows custom entity (`--id`) and time (`--time`) variables.
+- Perform a Hausman test between fixed and random effects on input file(s).
 - Duplicate output filename handling via autorename or overwrite.
 - Preview output files(s) directly in the console.
 - Dependencies can be automatically installed by dtabnk if `pip` is installed
@@ -30,6 +31,9 @@ The following run options are available for `dtabnk`:
 | `--quiet`         | Suppress command outputs in the terminal unless user input is required.                                                   |
 | `--overwrite`     | Overwrite existing file(s) without prompting for confirmation.                                               |
 | `--preview`       | Print the first 5 lines of the output file(s) in stdout.                            |
+| `--hausman`       | Perform a Hausman test between fixed and random effects on input file(s). If dependent variable not specified will perform test on all numerical variables. |
+| `--dep`           | Specify dependent variable for Hausman test. |
+| `--indep`         | Specify independent variable(s) for Hausman test |
 
 ### Example usage:
 
@@ -39,6 +43,9 @@ dtabnk
 
 # convert to STATA 15+ .dta format
 dtabnk data.csv
+
+# convert to STATA 15+ .dta format and perform Hausman test on data.csv using Gini_index (post-sanitised variable name) as the dependent variable and all other variables as the independent variables:
+dtabnk data.csv --hausman --dep Gini_index
 
 # convert data.csv and data.xlsx to spam.dta and eggs.dta respectively
 dtabnk data.csv data.xlsx --out spam eggs
@@ -85,10 +92,14 @@ chmod a+x dtabnk
 ## Dependencies
 - ≥Python 3.17.7 (This is the earliest version I have personally tested that worked)
 - [colorama](https://github.com/tartley/colorama)   BSD 3-Clause License
+- [numpy](https://github.com/numpy/numpy)           BSD License
 - [openpyxl](https://github.com/shshe/openpyxl)	    MIT License
 - [pandas](https://github.com/pandas-dev/pandas)    BSD 3-Clause License
 - [pyreadstat](https://github.com/Roche/pyreadstat) Apache License Version 2
 - [rpy2](https://github.com/rpy2/rpy2)              GNU General Public License Version 2
+- [statsmodels](https://github.com/statsmodels/statsmodels) BSD 3-Clause license
+- [scipy](https://github.com/scipy/scipy)            BSD 3-Clause License
+
 ## License
 This program is free software: you can redistribute it and/or modify it under the terms of the **GNU Lesser General Public License** as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public License for more details.
 
