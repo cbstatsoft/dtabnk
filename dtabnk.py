@@ -519,17 +519,17 @@ def main():
         "--hausman",
         action='store_true',
         help=(
-            "Perform a Hausman test between fixed and random effects on variable(s)"
+            "Perform Hausman tests between fixed and random effects with each variable as dependent against all others"
         ),
     )
     parser.add_argument(
         "--dep",
-        help="Specify post-sanitised dependent variable name for Hausman test"
+        help="Specify post-sanitised dependent variable name for Hausman test(s)"
     )
     parser.add_argument(
         "--indep",
         nargs="+",
-        help="Specify post-sanitised independent variable name(s) for Hausman test"
+        help="Specify post-sanitised independent variable name(s) for Hausman test(s)"
     )
 
 

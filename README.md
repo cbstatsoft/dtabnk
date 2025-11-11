@@ -32,9 +32,9 @@ The following run options are available for `dtabnk`:
 | `--quiet`         | Suppress command outputs in the terminal unless user input is required.                                     |
 | `--overwrite`     | Overwrite existing file(s) without prompting for confirmation.                                              |
 | `--preview`       | Print the first 5 lines of the output file(s) in stdout.                                                    |
-| `--hausman`       | Perform a Hausman test between fixed and random effects on variable(s).                                     |
-| `--dep`           | Specify post-sanitised dependent variable name for Hausman test.                                            |
-| `--indep`         | Specify post-sanitised independent variable name(s) for Hausman test                                        |
+| `--hausman`       | Perform Hausman tests between fixed and random effects with each variable as dependent against all others.  |
+| `--dep`           | Specify post-sanitised dependent variable name for Hausman test(s).                                         |
+| `--indep`         | Specify post-sanitised independent variable name(s) for Hausman test(s)                                     |
 
 ### Example usage:
 
