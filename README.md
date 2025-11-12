@@ -10,7 +10,7 @@
 - Generates a new column in `.dta` files with entity ID numbers, as STATA does not support using strings as entity names.
 - Sanitises variable names (e.g. 'US$' → 'USD', '%' → 'pct', ' ' → '_').
 - Allows custom entity (`--id`) and time (`--time`) variables.
-- Perform a Hausman test between fixed and random effects on input file variable(s).
+- Perform Durbin–Wu–**Hausman test(s)** between fixed and random effects on input file variable(s).
 - Duplicate output filename handling via autorename or overwrite.
 - Preview output files(s) directly in the console.
 - Dependencies can be automatically installed by dtabnk if `pip` is installed
@@ -32,7 +32,7 @@ The following run options are available for `dtabnk`:
 | `--quiet`         | Suppress command outputs in the terminal unless user input is required.                                     |
 | `--overwrite`     | Overwrite existing file(s) without prompting for confirmation.                                              |
 | `--preview`       | Print the first 5 lines of the output file(s) in stdout.                                                    |
-| `--hausman`       | Perform Hausman tests between fixed and random effects with each variable as dependent against all others.  |
+| `--hausman`       | Perform the Hausman test iteratively, using each variable as the dependent variable in turn, and testing it against all other variables as independent variables.  |
 | `--dep`           | Specify post-sanitised dependent variable name for Hausman test(s).                                         |
 | `--indep`         | Specify post-sanitised independent variable name(s) for Hausman test(s)                                     |
 
@@ -101,9 +101,4 @@ chmod a+x dtabnk
 - [statsmodels](https://github.com/statsmodels/statsmodels) BSD 3-Clause license
 - [scipy](https://github.com/scipy/scipy)            BSD 3-Clause License
 
-## License
-This program is free software: you can redistribute it and/or modify it under the terms of the **GNU Lesser General Public License** as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public License along with this program. If not, see <https://www.gnu.org/licenses/lgpl-3.0.txt>.
-
-Copyright (C) 2025 Connor Baird
+*Copyright (C) 2025 Connor Baird*

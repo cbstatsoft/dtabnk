@@ -519,7 +519,7 @@ def main():
         "--hausman",
         action='store_true',
         help=(
-            "Perform Hausman tests between fixed and random effects with each variable as dependent against all others"
+            "Iteratively run Hausman test(s) with each variable as dependent against all others"
         ),
     )
     parser.add_argument(
