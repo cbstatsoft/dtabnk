@@ -44,7 +44,16 @@ def install_package(package_name):
 
 
 def check_and_install_packages():
-    required = ["pandas", "pyreadstat", "rpy2", "colorama", "openpyxl", "numpy", "statsmodels", "scipy"]
+    required = [
+        "pandas",
+        "pyreadstat",
+        "rpy2",
+        "colorama",
+        "openpyxl",
+        "numpy",
+        "statsmodels",
+        "scipy",
+    ]
     missing = []
 
     for pkg in required:
@@ -408,29 +417,45 @@ def confirm_overwrite_or_rename(output_file, quiet=False, overwrite=False):
     return True  # No conflict, proceed as normal
 
 
-def hausman_test(df, id_var="Country", time_var="Year", dependent_vars=None, independent_vars=None, quiet=False):
+def hausman_test(
+    df,
+    id_var="Country",
+    time_var="Year",
+    dependent_vars=None,
+    independent_vars=None,
+    quiet=False,
+):
     if not {id_var, time_var}.issubset(df.columns):
-        raise ValueError(f"Columns '{id_var}' and/or '{time_var}' not found in DataFrame.")
+        raise ValueError(
+            f"Columns '{id_var}' and/or '{time_var}' not found in DataFrame."
+        )
 
     df = df.set_index([id_var, time_var])
 
     # Detect dependent variables if not provided
     if dependent_vars is None:
         dependent_vars = [
-            c for c in df.select_dtypes(include=[np.number]).columns
+            c
+            for c in df.select_dtypes(include=[np.number]).columns
             if c not in [id_var, time_var]
         ]
 
     for dep in dependent_vars:
         # Skip if dependent variable is also an independent variable
         if independent_vars and dep in independent_vars:
-            print_warn(f"Skipping Hausman test for {dep}: dependent variable identical to independent variable.")
+            print_warn(
+                f"Skipping Hausman test for {dep}: dependent variable identical to independent variable."
+            )
             continue
 
         df_sub = df.dropna(subset=[dep])
 
         # Identify independent variables
-        x_vars = independent_vars if independent_vars else [c for c in df_sub.columns if c != dep]
+        x_vars = (
+            independent_vars
+            if independent_vars
+            else [c for c in df_sub.columns if c != dep]
+        )
 
         if len(x_vars) == 0:
             print_warn(f"Skipping {dep}: no independent variables available.")
@@ -506,7 +531,11 @@ def main():
         action="store_true",
         help="This software's license information",
     )
-    parser.add_argument("--quiet", action="store_true", help="Suppress stdout unless user input is required")
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress stdout unless user input is required",
+    )
     parser.add_argument(
         "--overwrite", action="store_true", help="Overwrite file(s) without prompting"
     )
@@ -517,23 +546,20 @@ def main():
     )
     parser.add_argument(
         "--hausman",
-        action='store_true',
+        action="store_true",
         help=(
             "Iteratively run Hausman test(s) with each variable as dependent against all others"
         ),
     )
     parser.add_argument(
         "--dep",
-        help="Specify post-sanitised dependent variable name for Hausman test(s)"
+        help="Specify post-sanitised dependent variable name for Hausman test(s)",
     )
     parser.add_argument(
         "--indep",
         nargs="+",
-        help="Specify post-sanitised independent variable name(s) for Hausman test(s)"
+        help="Specify post-sanitised independent variable name(s) for Hausman test(s)",
     )
-
-
-    
 
     args = parser.parse_args()
     quiet, overwrite = args.quiet, args.overwrite
@@ -580,9 +606,12 @@ def main():
             dep_vars = [args.dep] if args.dep else None
             indep_vars = args.indep if args.indep else None
 
-        # Skip test if independent and dependent variables are identical
+            # Skip test if independent and dependent variables are identical
             if indep_vars and dep_vars and any(dep in indep_vars for dep in dep_vars):
-                print_warn("Skipping Hausman test: independent variable identical to dependent variable", quiet)
+                print_warn(
+                    "Skipping Hausman test: independent variable identical to dependent variable",
+                    quiet,
+                )
             else:
                 try:
                     hausman_test(
@@ -591,11 +620,11 @@ def main():
                         time_var=args.time,
                         dependent_vars=dep_vars,
                         independent_vars=indep_vars,
-                        quiet=quiet
+                        quiet=quiet,
                     )
                 except Exception as e:
                     print_err(f"Hausman test failed: {e}", quiet)
-    
+
         if "dta" in formats:
             output_file = f"{base}.dta"
             result = confirm_overwrite_or_rename(
