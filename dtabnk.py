@@ -385,36 +385,54 @@ def preview_file(file_path, num_rows=5):
         print_err(f"previewing file {file_path}: {e}")
 
 
-def confirm_overwrite_or_rename(output_file, quiet=False, overwrite=False):
-    if os.path.exists(output_file) and not overwrite:
-        user_input = (
-            input(
-                f"The file {output_file} exists. Do you want to (O)verwrite, (R)ename, or (S)kip? (O/R/S): "
-            )
-            .strip()
-            .lower()
-        )
+def confirm_overwrite_or_rename(
+    output_file, quiet=False, overwrite=False, rename=False
+):
+    if overwrite:
+        return True
 
-        if user_input == "o":
-            return True  # User chose to overwrite
-        elif user_input == "r":
-            # Ask for new name or automatically rename by appending a suffix
+    if rename:
+        if os.path.exists(output_file):
             base, ext = os.path.splitext(output_file)
             counter = 1
             new_file = f"{base}_{counter}{ext}"
             while os.path.exists(new_file):
                 counter += 1
                 new_file = f"{base}_{counter}{ext}"
+            if not quiet:
+                print_warn(f"Autorenaming {output_file} -> {new_file}")
+            return new_file
+        return True
 
+    if os.path.exists(output_file):
+        user_input = (
+            input(
+                f"The file {output_file} exists. "
+                "Do you want to (O)verwrite, (R)ename, or (S)kip? (O/R/S): "
+            )
+            .strip()
+            .lower()
+        )
+
+        if user_input == "o":
+            return True
+        elif user_input == "r":
+            base, ext = os.path.splitext(output_file)
+            counter = 1
+            new_file = f"{base}_{counter}{ext}"
+            while os.path.exists(new_file):
+                counter += 1
+                new_file = f"{base}_{counter}{ext}"
             print(f"Renaming to {new_file}")
-            return new_file  # Return the new filename with suffix
+            return new_file
         elif user_input == "s":
             print(f"Skipping {output_file}")
-            return None  # User chose to skip, return None
+            return None
         else:
-            print(f"Invalid choice. Skipping {output_file}")
-            return None  # Invalid input, skipping
-    return True  # No conflict, proceed as normal
+            print("Invalid choice. Skipping.")
+            return None
+
+    return True
 
 
 def hausman_test(
@@ -540,6 +558,11 @@ def main():
         "--overwrite", action="store_true", help="Overwrite file(s) without prompting"
     )
     parser.add_argument(
+        "--rename",
+        action="store_true",
+        help="Autorename existing output file(s) without prompting",
+    )
+    parser.add_argument(
         "--preview",
         action="store_true",
         help="Print first 5 lines of output file(s) to stdout",
@@ -562,7 +585,9 @@ def main():
     )
 
     args = parser.parse_args()
-    quiet, overwrite = args.quiet, args.overwrite
+    quiet = args.quiet
+    overwrite = args.overwrite
+    rename = args.rename
 
     if args.license:
         print(__doc__) if not quiet else None
@@ -628,7 +653,7 @@ def main():
         if "dta" in formats:
             output_file = f"{base}.dta"
             result = confirm_overwrite_or_rename(
-                output_file, quiet=quiet, overwrite=overwrite
+                output_file, quiet=quiet, overwrite=overwrite, rename=rename
             )
             if result is True:
                 convert_to_stata(
@@ -659,7 +684,7 @@ def main():
         if "sav" in formats:
             output_file = f"{base}.sav"
             result = confirm_overwrite_or_rename(
-                output_file, quiet=quiet, overwrite=overwrite
+                output_file, quiet=quiet, overwrite=overwrite, rename=rename
             )
             if result is True:
                 convert_to_spss(df, output_file, quiet=quiet, overwrite=overwrite)
@@ -674,7 +699,7 @@ def main():
         if "rdata" in formats:
             output_file = f"{base}.RData"
             result = confirm_overwrite_or_rename(
-                output_file, quiet=quiet, overwrite=overwrite
+                output_file, quiet=quiet, overwrite=overwrite, rename=rename
             )
             if result is True:
                 convert_to_rdata(df, output_file, quiet=quiet, overwrite=overwrite)
