@@ -32,7 +32,7 @@ The following run options are available for `dtabnk`:
 | `--quiet`         | Suppress command outputs in the terminal unless user input is required.                                     |
 | `--overwrite`     | Overwrite existing file(s) without prompting for confirmation.                                              |
 | `--rename`        | Autorename existing output file(s) without prompting.                                                       |
-| `--preview`       | Print the first 5 lines of the output file(s) in stdout.                                                    |
+| `--preview`       | Print the first 5 (default) lines of the output file(s) in stdout.                                                    |
 | `--hausman`       | Perform the Hausman test iteratively, using each variable as the dependent variable in turn, and testing it against all other variables as independent variables.  |
 | `--dep`           | Specify post-sanitised dependent variable name for Hausman test(s).                                         |
 | `--indep`         | Specify post-sanitised independent variable name(s) for Hausman test(s)                                     |
@@ -70,8 +70,8 @@ dtabnk data.csv --out custom_filename
 # specify custom entity and time variables
 dtabnk data.csv --id region --time period
 
-# preview the first 5 lines of the output file(s)
-dtabnk data.csv --preview
+# preview the first 10 lines of the output file
+dtabnk data.csv --preview 10
 ```
 ## Installation
 `dtabnk.py` can run on any system with Python 3 installed. It can also be installed and uninstalled on Unix-like operating systems using the appropriate `.sh` scripts.

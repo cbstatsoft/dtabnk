@@ -564,8 +564,10 @@ def main():
     )
     parser.add_argument(
         "--preview",
-        action="store_true",
-        help="Print first 5 lines of output file(s) to stdout",
+        nargs="?",
+        const=5,
+        type=int,
+        help="Print first 5 (default) lines of output file(s) to stdout",
     )
     parser.add_argument(
         "--hausman",
@@ -589,6 +591,16 @@ def main():
     overwrite = args.overwrite
     rename = args.rename
 
+    if not args.input_files or len(args.input_files) == 0:
+        parser.print_help()
+        return
+
+    missing_files = [f for f in args.input_files if not os.path.isfile(f)]
+    if missing_files:
+        print_err(
+            f"The following input file(s) do not exist: {', '.join(missing_files)}"
+        )
+        return
     if args.license:
         print(__doc__) if not quiet else None
         return
@@ -599,7 +611,7 @@ def main():
 
     # Check if the number of --out files matches the number of input files
     if args.out and len(args.out) != len(args.input_files):
-        print_err("The number of --out filenames must match the number of input files.")
+        print_err("The number of --out filenames must match the number of input files")
         return
 
     # Formats check
@@ -665,21 +677,21 @@ def main():
                     quiet=quiet,
                     overwrite=overwrite,
                 )
-                if args.preview:
-                    preview_file(output_file)
+                if args.preview is not None:
+                    preview_file(output_file, num_rows=args.preview)
             elif result is not None:
-                # The file was renamed
+                new_file = result
                 convert_to_stata(
                     df,
-                    result,
+                    new_file,
                     id_var=args.id,
                     time_var=args.time,
                     stata_version=args.stata,
                     quiet=quiet,
                     overwrite=overwrite,
                 )
-                if args.preview:
-                    preview_file(result)
+                if args.preview is not None:
+                    preview_file(new_file, num_rows=args.preview)
 
         if "sav" in formats:
             output_file = f"{base}.sav"
@@ -688,13 +700,13 @@ def main():
             )
             if result is True:
                 convert_to_spss(df, output_file, quiet=quiet, overwrite=overwrite)
-                if args.preview:
-                    preview_file(output_file)
+                if args.preview is not None:
+                    preview_file(output_file, num_rows=args.preview)
             elif result is not None:
-                # The file was renamed
-                convert_to_spss(df, result, quiet=quiet, overwrite=overwrite)
-                if args.preview:
-                    preview_file(result)
+                new_file = result
+                convert_to_spss(df, new_file, quiet=quiet, overwrite=overwrite)
+                if args.preview is not None:
+                    preview_file(new_file, num_rows=args.preview)
 
         if "rdata" in formats:
             output_file = f"{base}.RData"
@@ -703,13 +715,13 @@ def main():
             )
             if result is True:
                 convert_to_rdata(df, output_file, quiet=quiet, overwrite=overwrite)
-                if args.preview:
-                    preview_file(output_file)
+                if args.preview is not None:
+                    preview_file(output_file, num_rows=args.preview)
             elif result is not None:
-                # The file was renamed
-                convert_to_rdata(df, result, quiet=quiet, overwrite=overwrite)
-                if args.preview:
-                    preview_file(result)
+                new_file = result
+                convert_to_rdata(df, new_file, quiet=quiet, overwrite=overwrite)
+                if args.preview is not None:
+                    preview_file(new_file, num_rows=args.preview)
 
     print_ok("All files processed", quiet)
 
