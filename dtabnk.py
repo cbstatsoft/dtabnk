@@ -514,10 +514,12 @@ def hausman_test(
 
 
 # CLI
+
 def main():
     parser = argparse.ArgumentParser(
         description="Convert World Bank OpenData CSV/Excel to panel dataset in STATA (default), SPSS and/or R format(s). Compatible with default DataBank layout."
     )
+    
     # Modify input_file to accept multiple files
     parser.add_argument("input_files", nargs="*", help="Input CSV/Excel file(s)")
     parser.add_argument("--sav", action="store_true", help="Output SPSS/PSPP .sav file")
@@ -545,45 +547,20 @@ def main():
         help="Specify STATA version .dta output (8–15) (default: 15; STATA can read .dta files prepared for older versions)",
     )
     parser.add_argument(
-        "--license",
-        action="store_true",
-        help="This software's license information",
+        "--license", action="store_true", help="This software's license information"
     )
-    parser.add_argument(
-        "--quiet",
-        action="store_true",
-        help="Suppress stdout unless user input is required",
-    )
-    parser.add_argument(
-        "--overwrite", action="store_true", help="Overwrite file(s) without prompting"
-    )
-    parser.add_argument(
-        "--rename",
-        action="store_true",
-        help="Autorename existing output file(s) without prompting",
-    )
-    parser.add_argument(
-        "--preview",
-        nargs="?",
-        const=5,
-        type=int,
-        help="Print first 5 (default) lines of output file(s) to stdout",
-    )
+    parser.add_argument("--quiet", action="store_true", help="Suppress stdout unless user input is required")
+    parser.add_argument("--overwrite", action="store_true", help="Overwrite file(s) without prompting")
+    parser.add_argument("--rename", action="store_true", help="Autorename existing output file(s) without prompting")
+    parser.add_argument("--preview", nargs="?", const=5, type=int, help="Print first 5 (default) lines of output file(s) to stdout")
     parser.add_argument(
         "--hausman",
         action="store_true",
-        help=(
-            "Iteratively run Hausman test(s) with each variable as dependent against all others"
-        ),
+        help=("Iteratively run Hausman test(s) with each variable as dependent against all others"),
     )
+    parser.add_argument("--dep", help="Specify post-sanitised dependent variable name for Hausman test(s)")
     parser.add_argument(
-        "--dep",
-        help="Specify post-sanitised dependent variable name for Hausman test(s)",
-    )
-    parser.add_argument(
-        "--indep",
-        nargs="+",
-        help="Specify post-sanitised independent variable name(s) for Hausman test(s)",
+        "--indep", nargs="+", help="Specify post-sanitised independent variable name(s) for Hausman test(s)"
     )
 
     args = parser.parse_args()
@@ -591,22 +568,19 @@ def main():
     overwrite = args.overwrite
     rename = args.rename
 
+    # Check if --license flag is set and display the license, then exit
+    if args.license:
+        print(__doc__)  # License information stored in the docstring at the start
+        return  # Exit after displaying the license information
+
+    # If no input files are provided, show help
     if not args.input_files or len(args.input_files) == 0:
         parser.print_help()
         return
 
     missing_files = [f for f in args.input_files if not os.path.isfile(f)]
     if missing_files:
-        print_err(
-            f"The following input file(s) do not exist: {', '.join(missing_files)}"
-        )
-        return
-    if args.license:
-        print(__doc__) if not quiet else None
-        return
-
-    if not args.input_files:
-        parser.print_help()
+        print_err(f"The following input file(s) do not exist: {', '.join(missing_files)}")
         return
 
     # Check if the number of --out files matches the number of input files
@@ -614,7 +588,7 @@ def main():
         print_err("The number of --out filenames must match the number of input files")
         return
 
-    # Formats check
+    # Set formats based on flags
     if args.all:
         formats = ["dta", "sav", "rdata"]
     else:
@@ -626,7 +600,7 @@ def main():
         if not formats:
             formats.append("dta")  # Default to STATA format if no other is specified
 
-    # Loop over all input files
+    # Process each input file
     for i, input_file in enumerate(args.input_files):
         print_ok(f"Processing file: {input_file}", quiet)
 
@@ -634,9 +608,7 @@ def main():
         base = args.out[i] if args.out else os.path.splitext(input_file)[0]
 
         # Convert the dataframe to the appropriate format
-        df = convert_dataframe(
-            input_file, id_var=args.id, time_var=args.time, quiet=quiet
-        )
+        df = convert_dataframe(input_file, id_var=args.id, time_var=args.time, quiet=quiet)
 
         # Hausman Test
         if args.hausman:
@@ -646,8 +618,7 @@ def main():
             # Skip test if independent and dependent variables are identical
             if indep_vars and dep_vars and any(dep in indep_vars for dep in dep_vars):
                 print_warn(
-                    "Skipping Hausman test: independent variable identical to dependent variable",
-                    quiet,
+                    "Skipping Hausman test: independent variable identical to dependent variable", quiet
                 )
             else:
                 try:
@@ -662,11 +633,10 @@ def main():
                 except Exception as e:
                     print_err(f"Hausman test failed: {e}", quiet)
 
+        # Handle conversion to STATA, SPSS, and RData based on selected formats
         if "dta" in formats:
             output_file = f"{base}.dta"
-            result = confirm_overwrite_or_rename(
-                output_file, quiet=quiet, overwrite=overwrite, rename=rename
-            )
+            result = confirm_overwrite_or_rename(output_file, quiet=quiet, overwrite=overwrite, rename=rename)
             if result is True:
                 convert_to_stata(
                     df,
@@ -695,9 +665,7 @@ def main():
 
         if "sav" in formats:
             output_file = f"{base}.sav"
-            result = confirm_overwrite_or_rename(
-                output_file, quiet=quiet, overwrite=overwrite, rename=rename
-            )
+            result = confirm_overwrite_or_rename(output_file, quiet=quiet, overwrite=overwrite, rename=rename)
             if result is True:
                 convert_to_spss(df, output_file, quiet=quiet, overwrite=overwrite)
                 if args.preview is not None:
@@ -710,9 +678,7 @@ def main():
 
         if "rdata" in formats:
             output_file = f"{base}.RData"
-            result = confirm_overwrite_or_rename(
-                output_file, quiet=quiet, overwrite=overwrite, rename=rename
-            )
+            result = confirm_overwrite_or_rename(output_file, quiet=quiet, overwrite=overwrite, rename=rename)
             if result is True:
                 convert_to_rdata(df, output_file, quiet=quiet, overwrite=overwrite)
                 if args.preview is not None:
