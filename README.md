@@ -21,6 +21,9 @@ The following run options are available for `dtabnk`:
 | Flag              | Description                                                                                                 |
 |-------------------|-------------------------------------------------------------------------------------------------------------|
 | `-h, --help`      | Show help message and exit.                                                                                 |
+| `--pdat`          | Load all Excel files starting with "P_Data_Extract_From_" in current directory                              |
+| `--pdat-dir`      | Directory to search for "P_Data_Extract_From*.xlsx"                                                         |
+| `--pdat-zip`      | Load ZIP files starting with "P_Data_Extract_From_" and extract CSVs (excluding Metadata CSV)               |
 | `--sav`           | Output SPSS/PSPP `.sav` file.                                                                               |
 | `--rdata`         | Output R `.RData` file.                                                                                     |
 | `--all`           | Output all available formats (STATA, SPSS, R).                                                              |

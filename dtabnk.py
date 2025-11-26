@@ -31,6 +31,8 @@ import subprocess
 import sys
 import os
 import argparse
+import zipfile
+import tempfile
 
 
 # Dependency check
@@ -515,13 +517,28 @@ def hausman_test(
 
 # CLI
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Convert World Bank OpenData CSV/Excel to panel dataset in STATA (default), SPSS and/or R format(s). Compatible with default DataBank layout."
     )
-    
+
     # Modify input_file to accept multiple files
     parser.add_argument("input_files", nargs="*", help="Input CSV/Excel file(s)")
+    parser.add_argument(
+        "--pdat",
+        action="store_true",
+        help='Load all Excel files starting with "P_Data_Extract_From_" in current directory',
+    )
+    parser.add_argument(
+        "--pdat-dir",
+        help='Directory to search for "P_Data_Extract_From_*.xlsx"',
+    )
+    parser.add_argument(
+        "--pdat-zip",
+        action="store_true",
+        help='Load ZIP files starting with "P_Data_Extract_From_" and extract CSVs (excluding Metadata CSV)',
+    )
     parser.add_argument("--sav", action="store_true", help="Output SPSS/PSPP .sav file")
     parser.add_argument("--rdata", action="store_true", help="Output R .RData file")
     parser.add_argument("--all", action="store_true", help="Output all formats")
@@ -549,18 +566,41 @@ def main():
     parser.add_argument(
         "--license", action="store_true", help="This software's license information"
     )
-    parser.add_argument("--quiet", action="store_true", help="Suppress stdout unless user input is required")
-    parser.add_argument("--overwrite", action="store_true", help="Overwrite file(s) without prompting")
-    parser.add_argument("--rename", action="store_true", help="Autorename existing output file(s) without prompting")
-    parser.add_argument("--preview", nargs="?", const=5, type=int, help="Print first 5 (default) lines of output file(s) to stdout")
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress stdout unless user input is required",
+    )
+    parser.add_argument(
+        "--overwrite", action="store_true", help="Overwrite file(s) without prompting"
+    )
+    parser.add_argument(
+        "--rename",
+        action="store_true",
+        help="Autorename existing output file(s) without prompting",
+    )
+    parser.add_argument(
+        "--preview",
+        nargs="?",
+        const=5,
+        type=int,
+        help="Print first 5 (default) lines of output file(s) to stdout",
+    )
     parser.add_argument(
         "--hausman",
         action="store_true",
-        help=("Iteratively run Hausman test(s) with each variable as dependent against all others"),
+        help=(
+            "Iteratively run Hausman test(s) with each variable as dependent against all others"
+        ),
     )
-    parser.add_argument("--dep", help="Specify post-sanitised dependent variable name for Hausman test(s)")
     parser.add_argument(
-        "--indep", nargs="+", help="Specify post-sanitised independent variable name(s) for Hausman test(s)"
+        "--dep",
+        help="Specify post-sanitised dependent variable name for Hausman test(s)",
+    )
+    parser.add_argument(
+        "--indep",
+        nargs="+",
+        help="Specify post-sanitised independent variable name(s) for Hausman test(s)",
     )
 
     args = parser.parse_args()
@@ -568,27 +608,65 @@ def main():
     overwrite = args.overwrite
     rename = args.rename
 
-    # Check if --license flag is set and display the license, then exit
     if args.license:
-        print(__doc__)  # License information stored in the docstring at the start
-        return  # Exit after displaying the license information
+        print(__doc__)
+        return
 
-    # If no input files are provided, show help
-    if not args.input_files or len(args.input_files) == 0:
+    discovered_files = []
+    extracted_csvs = []
+
+    if args.pdat or args.pdat_dir:
+        search_dir = args.pdat_dir if args.pdat_dir else "."
+        for f in os.listdir(search_dir):
+            if f.startswith("P_Data_Extract_From_") and f.endswith(".xlsx"):
+                discovered_files.append(os.path.join(search_dir, f))
+        if not discovered_files and args.pdat:
+            print_err(f"No matching PDAT files found in {search_dir}")
+            return
+
+    if args.pdat_zip:
+        search_dir = args.pdat_dir if args.pdat_dir else "."
+        for f in os.listdir(search_dir):
+            if f.startswith("P_Data_Extract_From_") and f.endswith(".zip"):
+                zip_path = os.path.join(search_dir, f)
+                try:
+                    with zipfile.ZipFile(zip_path, "r") as z:
+                        tmp_dir = tempfile.mkdtemp(prefix="pdat_zip_")
+                        for name in z.namelist():
+                            if (
+                                name.lower().endswith(".csv")
+                                and "metadata" not in name.lower()
+                            ):
+                                extracted_path = os.path.join(
+                                    tmp_dir, os.path.basename(name)
+                                )
+                                z.extract(name, tmp_dir)
+                                # Move file to the expected path
+                                actual_extracted = os.path.join(tmp_dir, name)
+                                if os.path.exists(actual_extracted):
+                                    os.rename(actual_extracted, extracted_path)
+                                extracted_csvs.append(extracted_path)
+                                if not quiet:
+                                    print(f"Extracted CSV: {extracted_path}")
+                except Exception as e:
+                    print_err(f"Failed reading ZIP {zip_path}: {e}", quiet=quiet)
+
+    input_files = args.input_files + discovered_files + extracted_csvs
+    if not input_files:
         parser.print_help()
         return
 
-    missing_files = [f for f in args.input_files if not os.path.isfile(f)]
+    missing_files = [f for f in input_files if not os.path.isfile(f)]
     if missing_files:
-        print_err(f"The following input file(s) do not exist: {', '.join(missing_files)}")
+        print_err(
+            f"The following input file(s) do not exist: {', '.join(missing_files)}"
+        )
         return
 
-    # Check if the number of --out files matches the number of input files
-    if args.out and len(args.out) != len(args.input_files):
-        print_err("The number of --out filenames must match the number of input files")
+    if args.out and len(args.out) != len(input_files):
+        print_err("Number of --out filenames must match number of input files")
         return
 
-    # Set formats based on flags
     if args.all:
         formats = ["dta", "sav", "rdata"]
     else:
@@ -598,96 +676,65 @@ def main():
         if args.rdata:
             formats.append("rdata")
         if not formats:
-            formats.append("dta")  # Default to STATA format if no other is specified
+            formats.append("dta")
 
-    # Process each input file
-    for i, input_file in enumerate(args.input_files):
+    for i, input_file in enumerate(input_files):
         print_ok(f"Processing file: {input_file}", quiet)
+        base_name = (
+            args.out[i]
+            if args.out
+            else os.path.splitext(os.path.basename(input_file))[0]
+        )
 
-        # Check if a custom output filename is provided, otherwise use input file's base name
-        base = args.out[i] if args.out else os.path.splitext(input_file)[0]
+        df = convert_dataframe(
+            input_file, id_var=args.id, time_var=args.time, quiet=quiet
+        )
 
-        # Convert the dataframe to the appropriate format
-        df = convert_dataframe(input_file, id_var=args.id, time_var=args.time, quiet=quiet)
-
-        # Hausman Test
         if args.hausman:
             dep_vars = [args.dep] if args.dep else None
             indep_vars = args.indep if args.indep else None
-
-            # Skip test if independent and dependent variables are identical
-            if indep_vars and dep_vars and any(dep in indep_vars for dep in dep_vars):
-                print_warn(
-                    "Skipping Hausman test: independent variable identical to dependent variable", quiet
+            try:
+                hausman_test(
+                    df,
+                    id_var=args.id,
+                    time_var=args.time,
+                    dependent_vars=dep_vars,
+                    independent_vars=indep_vars,
+                    quiet=quiet,
                 )
+            except Exception as e:
+                print_err(f"Hausman test failed: {e}", quiet)
+
+        for fmt in formats:
+            ext_map = {"dta": ".dta", "sav": ".sav", "rdata": ".RData"}
+            output_file = base_name + ext_map[fmt]
+            result = confirm_overwrite_or_rename(
+                output_file, quiet=quiet, overwrite=overwrite, rename=rename
+            )
+            if result is None:
+                continue
+            if result is True:
+                out_path = output_file
             else:
-                try:
-                    hausman_test(
-                        df,
-                        id_var=args.id,
-                        time_var=args.time,
-                        dependent_vars=dep_vars,
-                        independent_vars=indep_vars,
-                        quiet=quiet,
-                    )
-                except Exception as e:
-                    print_err(f"Hausman test failed: {e}", quiet)
+                out_path = result
 
-        # Handle conversion to STATA, SPSS, and RData based on selected formats
-        if "dta" in formats:
-            output_file = f"{base}.dta"
-            result = confirm_overwrite_or_rename(output_file, quiet=quiet, overwrite=overwrite, rename=rename)
-            if result is True:
+            if fmt == "dta":
                 convert_to_stata(
                     df,
-                    output_file,
+                    out_path,
                     id_var=args.id,
                     time_var=args.time,
                     stata_version=args.stata,
                     quiet=quiet,
                     overwrite=overwrite,
                 )
-                if args.preview is not None:
-                    preview_file(output_file, num_rows=args.preview)
-            elif result is not None:
-                new_file = result
-                convert_to_stata(
-                    df,
-                    new_file,
-                    id_var=args.id,
-                    time_var=args.time,
-                    stata_version=args.stata,
-                    quiet=quiet,
-                    overwrite=overwrite,
-                )
-                if args.preview is not None:
-                    preview_file(new_file, num_rows=args.preview)
+            elif fmt == "sav":
+                convert_to_spss(df, out_path, quiet=quiet, overwrite=overwrite)
+            elif fmt == "rdata":
+                convert_to_rdata(df, out_path, quiet=quiet, overwrite=overwrite)
 
-        if "sav" in formats:
-            output_file = f"{base}.sav"
-            result = confirm_overwrite_or_rename(output_file, quiet=quiet, overwrite=overwrite, rename=rename)
-            if result is True:
-                convert_to_spss(df, output_file, quiet=quiet, overwrite=overwrite)
-                if args.preview is not None:
-                    preview_file(output_file, num_rows=args.preview)
-            elif result is not None:
-                new_file = result
-                convert_to_spss(df, new_file, quiet=quiet, overwrite=overwrite)
-                if args.preview is not None:
-                    preview_file(new_file, num_rows=args.preview)
-
-        if "rdata" in formats:
-            output_file = f"{base}.RData"
-            result = confirm_overwrite_or_rename(output_file, quiet=quiet, overwrite=overwrite, rename=rename)
-            if result is True:
-                convert_to_rdata(df, output_file, quiet=quiet, overwrite=overwrite)
-                if args.preview is not None:
-                    preview_file(output_file, num_rows=args.preview)
-            elif result is not None:
-                new_file = result
-                convert_to_rdata(df, new_file, quiet=quiet, overwrite=overwrite)
-                if args.preview is not None:
-                    preview_file(new_file, num_rows=args.preview)
+            if args.preview is not None:
+                preview_file(out_path, num_rows=args.preview)
 
     print_ok("All files processed", quiet)
 
