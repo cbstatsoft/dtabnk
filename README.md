@@ -1,8 +1,6 @@
 # dtabnk
 
-[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)  
-[![License](https://img.shields.io/badge/license-GPL%20v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.html)  
-[![Polars](https://img.shields.io/badge/polars-fast-green.svg)](https://www.pola.rs/)
+[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/) [![License](https://img.shields.io/badge/license-GPL%20v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.html) [![Polars](https://img.shields.io/badge/polars-fast-green.svg)](https://www.pola.rs/)
 
 `dtabnk` is a memory-efficient CLI tool to **convert World Bank OpenData CSV/Excel files to panel datasets** in STATA (default), SPSS, and/or R formats. It is designed to be able to process large datasets even in low-RAM environments. Compatible with the default DataBank layout.
 
