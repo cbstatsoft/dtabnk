@@ -1,108 +1,80 @@
-
 # dtabnk
 
-[![Python Version](https://img.shields.io/badge/python-3.7.17%2B-blue.svg)](https://www.python.org/downloads/release/python-3717/)  [![License](https://img.shields.io/badge/license-GPL%20v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.html)  
+[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)  
+[![License](https://img.shields.io/badge/license-GPL%20v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.html)  
+[![Polars](https://img.shields.io/badge/polars-fast-green.svg)](https://www.pola.rs/)
 
-`dtabnk` is a CLI tool to **convert World Bank OpenData CSV/Excel files to panel datasets** in STATA (default), SPSS, and/or R formats. It is compatible with the default DataBank layout.
+`dtabnk` is a memory-efficient CLI tool to **convert World Bank OpenData CSV/Excel files to panel datasets** in STATA (default), SPSS, and/or R formats. It is designed to be able to process large datasets even in low-RAM environments. Compatible with the default DataBank layout.
 
 ## Features
-- Converts `.csv`/`.xlsx`/`.xls` files to STATA `.dta` (default), SPSS/PSPP `.sav`, and/or R `.RData` panel datasets.
-- Generates a new column in `.dta` files with entity ID numbers, as STATA does not support using strings as entity names.
-- Sanitises variable names (e.g. 'US$' → 'USD', '%' → 'pct', ' ' → '_').
-- Allows custom entity (`--id`) and time (`--time`) variables.
-- Perform Durbin–Wu–**Hausman test(s)** on input variable(s).
-- Duplicate output filename handling via autorename or overwrite.
-- Preview output files(s) directly in the console.
-- Dependencies can be automatically installed by dtabnk if `pip` is installed
+
+### Core Conversion
+- **Multi-Format Export**: Converts `.csv`/`.xlsx`/`.xls` files to STATA `.dta` (default), SPSS/PSPP `.sav`, and/or R `.RData`.
+- **Variable Sanitisation**: Cleans column names (e.g., `'US$'` → `'USD'`, `'%'` → `'pct'`, `' '` → `'_'`).
+- **Flexible Mapping**: Supports custom entity (`--id`) and time (`--time`) variable names with intelligent fallback detection.
+
+### Performance & Memory Optimization
+- **Parquet Intermediate**: For files >500MB, automatically converts `.xlsx`/`.xls` to a compressed Parquet file first to drastically reduce memory usage and I/O time during processing.
+- **Lazy Loading**: Uses `Polars`' streaming engine for `.csv`files >100MB to process datasets larger than available RAM.
+- **Eager Loading**: Uses fast, direct loading for smaller files (<100MB) to minimize overhead.
+
+### Data Cleaning
+- **Footer Metadata Stripping**: Automatically detects and removes World Bank footer lines (e.g., "Data from database:...", "Last Updated:...").
+- **Header Metadata Skipping**: Scans the top of CSV files to skip non-header metadata lines before reading data.
+- **Column Sanitisation**: Ensures all column names are valid, unique, and compatible with statistical software.
+
+### Safety & Convenience
+- **Safe Overwrite Protection**: Refuses to overwrite existing files unless `--overwrite` is explicitly used.
+- **Auto-Dependency Installation**: Automatically installs missing Python packages (Polars, PyReadStat, etc.) if `pip` is available.
+- **Graceful Fallbacks**: Automatically switches between `fastexcel` and `openpyxl` engines if one fails.
+
 ## Command-Line Options
 
 The following run options are available for `dtabnk`:
 
-| Flag              | Description                                                                                                 |
-|-------------------|-------------------------------------------------------------------------------------------------------------|
-| `-h, --help`      | Show help message and exit.                                                                                 |
-| `--pdat`          | Load all Excel files starting with "P_Data_Extract_From_" in current directory                              |
-| `--pdat-dir`      | Directory to search for "P_Data_Extract_From*.xlsx"                                                         |
-| `--pdat-zip`      | Load ZIP files starting with "P_Data_Extract_From_" and extract CSVs (excluding Metadata CSV)               |
-| `--sav`           | Output SPSS/PSPP `.sav` file.                                                                               |
-| `--rdata`         | Output R `.RData` file.                                                                                     |
-| `--all`           | Output all available formats (STATA, SPSS, R).                                                              |
-| `--out    `       | Specify the output filename(s) (default: input filename).                                                   |
-| `--id`            | Specify the entity (default: `Country`).<br>DataBank 'Country Name' converted to 'Country' automatically.   |
-| `--time`          | Specify the time variable (default: `Year`).<br>Letters etc. removed automatically.                         |
-| `--stata`         | Specify STATA version `.dta` output (8–15; default: 15).<br>STATA can read `.dta` files prepared for older versions.|
-| `--license`       | Print software license information in stdout.                                                               |
-| `--quiet`         | Suppress command outputs in the terminal unless user input is required.                                     |
-| `--overwrite`     | Overwrite existing file(s) without prompting for confirmation.                                              |
-| `--rename`        | Autorename existing output file(s) without prompting.                                                       |
-| `--preview`       | Print the first 5 (default) lines of the output file(s) in stdout.                                                    |
-| `--hausman`       | Perform the Hausman test iteratively, using each variable as the dependent variable in turn, and testing it against all other variables as independent variables.  |
-| `--dep`           | Specify post-sanitised dependent variable name for Hausman test(s).                                         |
-| `--indep`         | Specify post-sanitised independent variable name(s) for Hausman test(s)                                     |
+| Flag | Description |
+|------|-------------|
+| `-h, --help` | Show help message and exit. |
+| `--sav` | Output SPSS/PSPP `.sav` file. |
+| `--rdata` | Output R `.RData` file. |
+| `--all` | Output all available formats (STATA, SPSS, R). |
+| `--out` | Specify the output filename(s) (default: input filename). Must match the number of input files. |
+| `--id` | Specify the entity ID column name (default: `Country`). Automatically maps `Country_Name` to `Country`. |
+| `--time` | Specify the time variable name (default: `Year`). Automatically extracts years from column headers. |
+| `--stata` | Specify STATA `.dta` version (8–15; default: 15). |
+| `--parquet` | Size (MB) threshold to enable Parquet Intermediate processing (default: 500). |
+| `--overwrite` | Overwrite existing output files without prompting. |
+| `--license` | Print software license information and exit. |
 
-### Example usage:
+### Example Usage
 
 ```bash
-# display help information
+# Display help information
 dtabnk
 
-# convert to STATA 15+ .dta format
+# Convert a single CSV to STATA format
 dtabnk data.csv
 
-# convert to STATA 15+ .dta format and perform Hausman test on data.csv using Gini_index as the dependent variable and all other variables as the independent variables:
-dtabnk data.csv --hausman --dep Gini_index
-
-# convert data.csv and data.xlsx to oingo.dta and boingo.dta respectively
-dtabnk data.csv data.xlsx --out oingo boingo
-
-# convert data.csv and data.xlsx to STATA 15+ .dta format, dtabnk will ask if you wish to overwrite, rename to data_1, or skip data.xlsx (O/R/S)
-dtabnk data.csv data.xlsx
-
-# convert to SPSS/PSPP and R formats
-dtabnk data.csv --sav --rdata
-
-# convert to STATA 13+ .dta format
-dtabnk data.csv --stata 13
-
-# convert to all formats
+# Convert to STATA, SPSS, and R formats simultaneously
 dtabnk data.csv --all
 
-# specify custom output filename
-dtabnk data.csv --out custom_filename
+# Convert multiple files with custom output names
+dtabnk data.csv data.xlsx --out oingo boingo
 
-# specify custom entity and time variables
+# Convert to STATA version 13 format
+dtabnk data.csv --stata 13
+
+# Specify custom entity and time columns
 dtabnk data.csv --id region --time period
 
-# preview the first 10 lines of the output file
-dtabnk data.csv --preview 10
-```
-## Installation
-`dtabnk.py` can run on any system with Python 3 installed. It can also be installed and uninstalled on Unix-like operating systems using the appropriate `.sh` scripts.
-```bash
-git clone https://github.com/cbstatsoft/dtabnk.git
-chmod a+x ./dtabnk/install.sh
-./dtabnk/install.sh
+# Force overwrite of existing output files
+dtabnk data.csv --overwrite
 
-chmod a+x ./dtabnk/uninstall.sh
-./dtabnk/uninstall.sh
-```
-`dtabnk.py` can be executed directly on Unix-like operating systems without invoking `python`/`python3` as the interpreter.
-```bash
-git clone https://github.com/cbstatsoft/dtabnk.git
-cd dtabnk
-mv dtabnk.py dtabnk
-chmod a+x dtabnk
-./dtabnk
-```
-## Dependencies
-- ≥Python 3.17.7 (This is the earliest version I have personally tested that worked)
-- [colorama](https://github.com/tartley/colorama)   BSD 3-Clause License
-- [numpy](https://github.com/numpy/numpy)           BSD License
-- [openpyxl](https://github.com/shshe/openpyxl)	    MIT License
-- [pandas](https://github.com/pandas-dev/pandas)    BSD 3-Clause License
-- [pyreadstat](https://github.com/Roche/pyreadstat) Apache License Version 2
-- [rpy2](https://github.com/rpy2/rpy2)              GNU General Public License Version 2
-- [statsmodels](https://github.com/statsmodels/statsmodels) BSD 3-Clause license
-- [scipy](https://github.com/scipy/scipy)            BSD 3-Clause License
+# Process a large Excel file using Parquet Intermediate (>500MB)
+dtabnk huge_data.xlsx --parquet 500 --all
 
-*Copyright (C) 2025 Connor Baird*
+# View license information
+dtabnk --license
+```
+
+*(C) Connor Baird 2026*

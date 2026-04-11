@@ -1,743 +1,329 @@
 #!/usr/bin/env python3
+# (C) Connor Baird 2026 GNU GPL-3.0-or-later
 
-"""
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/gpl-3.0.txt>.
-
-Copyright (C) 2025 Connor Baird
-
-Used Libraries:
-    colorama <https://github.com/tartley/colorama>: BSD 3-Clause License
-    numpy <https://github.com/numpy/numpy>: BSD License
-    openpyxl <https://github.com/shshe/openpyxl>: MIT License
-    pandas <https://github.com/pandas-dev/pandas>: BSD 3-Clause License
-    pyreadstat <https://github.com/Roche/pyreadstat>: Apache License Version 2
-    rpy2 <https://github.com/rpy2/rpy2>: GNU General Public License Version 2
-    statsmodels <https://github.com/statsmodels/statsmodels>: BSD 3-Clause License
-    scipy <https://github.com/scipy/scipy>: BSD 3-Clause License
-"""
-
-import subprocess
-import sys
-import os
 import argparse
-import zipfile
-import tempfile
+import os
+import sys
+import subprocess
+import gc
 
+REQ = ["polars", "pyreadstat", "rpy2", "openpyxl", "fastexcel"]
 
-# Dependency check
-def install_package(package_name):
-    print(f"Installing {package_name}...")
-    try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
-    except subprocess.CalledProcessError as e:
-        print_err(f"Failed to install {package_name}. Error: {e}")
-        sys.exit(1)
-
-
-def check_and_install_packages():
-    required = [
-        "pandas",
-        "pyreadstat",
-        "rpy2",
-        "colorama",
-        "openpyxl",
-        "numpy",
-        "statsmodels",
-        "scipy",
-    ]
+def ensure():
     missing = []
-
-    for pkg in required:
+    for p in REQ:
         try:
-            __import__(pkg)
+            __import__(p)
         except ImportError:
-            missing.append(pkg)
-
+            missing.append(p)
     if missing:
-        print(f"Missing package(s): {', '.join(missing)}")
-        if input("Install now? (Y/n): ").strip().lower() or "y" == "y":
-            for pkg in missing:
-                install_package(pkg)
+        print(f"Installing missing packages: {', '.join(missing)}...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install"] + missing)
+        except subprocess.CalledProcessError:
+            sys.exit("Failed to install dependencies.")
 
+ensure()
 
-check_and_install_packages()
-
-import openpyxl
-import pandas as pd
+import polars as pl
 import pyreadstat
 import rpy2.robjects as ro
-from rpy2.robjects import r
 from rpy2.robjects import pandas2ri
 from rpy2.robjects.conversion import localconverter
-import numpy as np
-import statsmodels.api as sm
-from scipy.stats import chi2
 
-# Colour setup
-try:
-    from colorama import Fore, Style, init as color_init
+# Default thresholds (in MB)
+DEFAULT_LAZY_THRESHOLD = 100
+DEFAULT_PARQUET_THRESHOLD = 500
 
-    color_init()
-    COLOUR_OK, COLOUR_WARN, COLOUR_ERR, COLOUR_RESET = (
-        Fore.GREEN,
-        Fore.YELLOW,
-        Fore.RED,
-        Style.RESET_ALL,
+LICENSE_TEXT = """
+GNU General Public Licence v3.0 or later
+
+This programme is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public Licence as published by
+the Free Software Foundation, either version 3 of the Licence, or
+(at your option) any later version.
+
+This programme is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public Licence for more details.
+
+You should have received a copy of the GNU General Public Licence
+along with this programme.  If not, see <https://www.gnu.org/licenses/>.
+
+(C) Connor Baird 2026
+"""
+
+def find_header_row(path):
+    try:
+        with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+            for i, line in enumerate(f):
+                line = line.strip()
+                if not line:
+                    continue
+                if ',' in line and any(c.isalnum() for c in line):
+                    parts = line.split(',')
+                    if len(parts) > 1:
+                        if not parts[0].strip().replace('.', '').replace('-', '').isdigit():
+                            return i
+        return 0
+    except Exception:
+        return 0
+
+def strip_bottom_metadata(df):
+    if df.height == 0:
+        return df
+    first_col = df.columns[0]
+    pattern_db = r"(?i)^Data from database:"
+    pattern_updated = r"(?i)^Last Updated:"
+    is_metadata = (
+        pl.col(first_col).str.contains(pattern_db) |
+        pl.col(first_col).str.contains(pattern_updated)
     )
-except ImportError:
-    COLOUR_OK = COLOUR_WARN = COLOUR_ERR = COLOUR_RESET = ""
+    return df.filter(~is_metadata)
 
+def sanitise(cols, max_len=32):
+    seen, out = set(), []
+    for c in cols:
+        c = str(c).replace(" ", "_").replace("%", "pct")
+        c = "".join(ch for ch in c if ch.isalnum() or ch == "_")
+        if not c or not c[0].isalpha():
+            c = "v_" + c
+        c = c[:max_len]
+        base, i = c, 1
+        while c in seen:
+            c = f"{base}_{i}"; i += 1
+        seen.add(c); out.append(c)
+    return out
 
-# Utility print functions
-def printv(msg, quiet=False):
-    if not quiet:
-        print(msg)
+def collect_with_engine(lf):
+    try:
+        return lf.collect(engine="streaming")
+    except TypeError:
+        return lf.collect(streaming=True)
 
-
-def print_warn(msg, quiet=False):
-    if not quiet:
-        print(f"{COLOUR_WARN}WARNING: {msg}{COLOUR_RESET}")
-
-
-def print_err(msg, quiet=False):
-    print(f"{COLOUR_ERR}ERROR: {msg}{COLOUR_RESET}")
-
-
-def print_ok(msg, quiet=False):
-    if not quiet:
-        print(f"{COLOUR_OK}{msg}{COLOUR_RESET}")
-
-
-# Column name sanitiser
-def sanitise_column_names(columns, max_length=32, quiet=False):
-    # Currency symbols mapping to currency codes
-    currency_map = {
-        "US$": "USD",
-        "$": "USD",  # US Dollar
-        "£": "GBP",  # British Pound
-        "€": "EUR",  # Euro
-        "¥": "JPY",  # Japanese Yen
-        "₹": "INR",  # Indian Rupee
-        "$CA": "CAD",  # Canadian Dollar
-        "A$": "AUD",  # Australian Dollar
-        "₣": "CHF",  # Swiss Franc
-        "₩": "KRW",  # South Korean Won
-    }
-
-    reserved_keywords = {
-        "if",
-        "in",
-        "using",
-        "with",
-        "for",
-        "sum",
-        "replace",
-        "keep",
-        "drop",
-        "by",
-        "end",
-        "scalar",
-        "byte",
-        "int",
-        "long",
-        "float",
-        "double",
-        "str",
-        "gen",
-        "egen",
-        "local",
-        "global",
-        "label",
-    }
-    sanitised = []
-    seen = set()
-
-    for col in columns:
-        original_col = col
-
-        # Replace currency symbols with corresponding currency codes
-        for symbol, currency in currency_map.items():
-            col = col.replace(symbol, currency)
-
-        # Clean up column name (remove non-alphanumeric chars except underscore)
-        col = "".join(
-            ch if ch.isalnum() or ch == "_" else ""
-            for ch in col.strip()
-            .replace(" ", "_")
-            .replace("%", "pct")
-            .replace("-", "_")
-        )
-
-        # Ensure the column name starts with a letter
-        if not col or not col[0].isalpha():
-            col = "v_" + col
-
-        # Truncate long names and handle STATA reserved words
-        if len(col) > max_length:
-            truncated_col = col[:max_length]
-            if not quiet:
-                print_warn(
-                    f"Column '{original_col}' exceeds {max_length} chars. Suggested '{truncated_col}'"
-                )
-            # Ask user if they want to enter a custom name
-            new_col = input(
-                f"Column '{original_col}' exceeds {max_length} characters. Enter custom name (or press Enter to accept default '{truncated_col}'): "
-            ).strip()
-            col = new_col if new_col else truncated_col
-
-        if col.lower() in reserved_keywords:
-            col += "_var"
-
-        # Ensure uniqueness of column names
-        base = col
-        counter = 1
-        while col.lower() in seen:
-            col = f"{base}_{counter}"
-            counter += 1
-        seen.add(col.lower())
-        sanitised.append(col)
-
-    return sanitised
-
-
-# File safety
-def sanitise_filename(filename, max_length=255, quiet=False):
-    basename, ext = os.path.splitext(os.path.basename(filename))
-    full_path = os.path.abspath(filename)
-    if len(full_path) > max_length:
-        (
-            print_warn(
-                f"Full path exceeds {max_length} chars. Suggesting '{basename}'", quiet
-            )
-            if not quiet
-            else None
-        )
-    if len(basename) > max_length:
-        basename = basename[:max_length]
-        (
-            print_warn(
-                f"Filename '{basename}' too long. Suggesting '{basename}'", quiet
-            )
-            if not quiet
-            else None
-        )
-    return basename + ext
-
-
-# Conversion functions
-
-
-def convert_to_stata(
-    df,
-    output_file,
-    id_var="Country",
-    time_var="Year",
-    stata_version=15,
-    quiet=False,
-    overwrite=False,
-):
-    output_file = sanitise_filename(output_file, quiet=quiet)
-    if not output_file.endswith(".dta"):
-        output_file += ".dta"
+def process_file(path, id_var, time_var, lazy_thresh, parquet_thresh):
+    ext = os.path.splitext(path)[1].lower()
+    file_size = os.path.getsize(path)
+    
+    use_parquet = file_size > parquet_thresh * 1024 * 1024
+    use_lazy = file_size > lazy_thresh * 1024 * 1024
+    
+    lf = None
+    temp_parquet_path = None
 
     try:
-        df_to_save = df.copy()
-        if not pd.api.types.is_numeric_dtype(df_to_save[id_var]):
-            df_to_save["ID"] = df_to_save[id_var].astype("category").cat.codes + 1
-        else:
-            df_to_save["ID"] = df_to_save[id_var]
+        # --- STRATEGY 1: Parquet Intermediate for Large Files ---
+        if use_parquet:
+            print(f"Large file ({file_size / 1024 / 1024:.1f} MB). Using Parquet Intermediate for efficiency...")
+            temp_parquet_path = path + ".parquet.tmp"
+            
+            try:
+                if ext == ".csv":
+                    df_src = pl.read_csv(path, skip_rows=find_header_row(path))
+                elif ext in [".xlsx", ".xls"]:
+                    try:
+                        df_src = pl.read_excel(path, engine="fastexcel")
+                    except Exception:
+                        df_src = pl.read_excel(path, engine="openpyxl")
+                else:
+                    raise ValueError("Unsupported format")
+                
+                df_src.write_parquet(temp_parquet_path, compression="zstd")
+                del df_src
+                gc.collect()
+                lf = pl.scan_parquet(temp_parquet_path)
+                print("Parquet intermediate conversion complete.")
+            except Exception as e:
+                print(f"Parquet intermediate failed: {e}. Falling back.")
+                lf = None
 
-        pyreadstat.write_dta(df_to_save, output_file, version=stata_version)
-        print_ok(f"STATA {stata_version}+ .dta file written: {output_file}", quiet)
-
-    except Exception as e:
-        print_err(f"STATA file write failed: {e}", quiet)
-
-
-def convert_to_spss(df, output_file, quiet=False, overwrite=False):
-    output_file = sanitise_filename(output_file, quiet=quiet)
-    if not output_file.endswith(".sav"):
-        output_file += ".sav"
-
-    try:
-        pyreadstat.write_sav(df, output_file)
-        print_ok(f"SPSS/PSPP .sav file written: {output_file}", quiet)
-    except Exception as e:
-        print_err(f"SPSS/PSPP write failed: {e}", quiet)
-
-
-def convert_to_rdata(df, output_file, quiet=False, overwrite=False):
-    output_file = sanitise_filename(output_file, quiet=quiet)
-    if not output_file.endswith(".RData"):
-        output_file += ".RData"
-
-    try:
-        with localconverter(ro.default_converter + pandas2ri.converter):
-            ro.globalenv["df"] = df
-        r(f"save(df, file='{output_file}')")
-        print_ok(f"R .RData file written: {output_file}", quiet)
-    except Exception as e:
-        print_err(f"RData write failed: {e}", quiet)
-
-
-# Data preparation
-def convert_dataframe(input_file, id_var="Country", time_var="Year", quiet=False):
-    if input_file.endswith(".csv"):
-        data = pd.read_csv(input_file)
-    elif input_file.endswith((".xlsx", ".xls")):
-        data = pd.read_excel(input_file)
-    else:
-        raise ValueError("Unsupported file format: use .csv or .xlsx")
-
-    data = data.dropna(how="all").replace("..", pd.NA)
-    data.columns = sanitise_column_names(data.columns, quiet=quiet)
-    if "Country_Name" in data.columns:
-        data.rename(columns={"Country_Name": "Country"}, inplace=True)
-
-    id_vars = [id_var, "Series_Name"] if "Series_Name" in data.columns else [id_var]
-    data_long = data.drop(
-        columns=["Country_Code", "Series_Code"], errors="ignore"
-    ).melt(id_vars=id_vars, var_name=time_var, value_name="Value")
-
-    data_long[time_var] = pd.to_numeric(
-        data_long[time_var].astype(str).str.extract(r"(\d{4})")[0], errors="coerce"
-    )
-    data_long["Value"] = pd.to_numeric(data_long["Value"], errors="coerce")
-    if "Series_Name" in data_long.columns:
-        data_long.rename(columns={"Series_Name": "Series"}, inplace=True)
-
-    if "Series" in data_long.columns:
-        df_wide = data_long.pivot_table(
-            index=[id_var, time_var], columns="Series", values="Value", aggfunc="mean"
-        )
-        df_wide.columns = sanitise_column_names(df_wide.columns, quiet=quiet)
-        df_wide.reset_index(inplace=True)
-    else:
-        df_wide = data_long.copy()
-
-    return df_wide
-
-
-def preview_file(file_path, num_rows=5):
-    try:
-        # Check for .dta (STATA) file
-        if file_path.endswith(".dta"):
-            # Use pyreadstat to read .dta file (STATA)
-            df, meta = pyreadstat.read_dta(file_path)
-            if isinstance(df, pd.DataFrame):
-                print_ok(f"Preview of {file_path}:")
-                print(df.head(num_rows))
-            else:
-                print_err(f"Failed to read .dta file properly: {file_path}")
-                df = None
-
-        # Check for .sav (SPSS) file
-        elif file_path.endswith(".sav"):
-            # Use pyreadstat to read .sav file (SPSS)
-            df, meta = pyreadstat.read_sav(file_path)
-            if isinstance(df, pd.DataFrame):
-                print_ok(f"Preview of {file_path}:")
-                print(df.head(num_rows))
-            else:
-                print_err(f"Failed to read .sav file properly: {file_path}")
-                df = None
-
-        # Check for .RData file
-        elif file_path.endswith(".RData"):
-            # Load the RData file
-            ro.r["load"](file_path)
-            # Access the object from the global environment (assuming it's named 'df' in R)
-            r_obj = ro.globalenv["df"]
-
-            # Convert the R object to a pandas DataFrame (check if it's already a DataFrame)
-            with localconverter(ro.default_converter + pandas2ri.converter):
+        # --- STRATEGY 2: Standard Loading ---
+        if lf is None:
+            if ext == ".csv":
+                if use_lazy:
+                    try:
+                        lf = pl.scan_csv(path, skip_rows=find_header_row(path))
+                    except AttributeError:
+                        print("Lazy CSV unsupported. Using eager.")
+                        lf = pl.read_csv(path, skip_rows=find_header_row(path))
+                else:
+                    lf = pl.read_csv(path, skip_rows=find_header_row(path))
+            elif ext in [".xlsx", ".xls"]:
                 try:
-                    df = pandas2ri.rpy2py(r_obj)
-                except Exception as e:
-                    print_err(f"Converting R object to pandas DataFrame: {e}")
-                    df = None
-
-            # If the conversion was successful and it's a DataFrame, show the preview
-            if isinstance(df, pd.DataFrame):
-                print_ok(f"Preview of {file_path}:")
-                print(df.head(num_rows))
+                    lf = pl.read_excel(path, engine="fastexcel")
+                except Exception:
+                    lf = pl.read_excel(path, engine="openpyxl")
             else:
-                print_err(
-                    f"Failed to convert R object to pandas DataFrame for {file_path}"
-                )
-                df = None
+                raise ValueError("Unsupported format")
 
+        # --- COMMON PROCESSING ---
+        
+        if isinstance(lf, pl.LazyFrame):
+            df_temp = collect_with_engine(lf)
+            df_temp = strip_bottom_metadata(df_temp)
+            lf = df_temp
         else:
-            print_err(f"Unsupported file format: {file_path}")
+            lf = strip_bottom_metadata(lf)
 
-        return df  # Return the DataFrame (or None if it couldn't be loaded)
+        schema = lf.columns if isinstance(lf, pl.DataFrame) else collect_with_engine(lf.head(0)).columns
+        new_cols = sanitise(schema)
+        lf = lf.rename(dict(zip(schema, new_cols)))
 
+        actual_id_var = id_var
+        if id_var == "Country" and "Country_Name" in lf.columns:
+            actual_id_var = "Country_Name"
+        elif id_var not in lf.columns:
+            matches = [c for c in lf.columns if c.lower() == id_var.lower()]
+            if matches:
+                actual_id_var = matches[0]
+                print(f"Info: Using '{actual_id_var}' for ID column '{id_var}'.")
+            else:
+                avail = ", ".join(list(lf.columns)[:10])
+                if len(lf.columns) > 10: avail += "..."
+                raise ValueError(f"ID column '{id_var}' not found.\nAvailable: {avail}")
+
+        actual_time_var = time_var
+        if time_var == "Year":
+            year_like = [c for c in lf.columns if any(ch.isdigit() for ch in c) and c not in [actual_id_var]]
+            if year_like:
+                actual_time_var = year_like[0]
+                print(f"Info: Using '{actual_time_var}' for Time column '{time_var}'.")
+        elif time_var not in lf.columns:
+            matches = [c for c in lf.columns if c.lower() == time_var.lower()]
+            if matches:
+                actual_time_var = matches[0]
+                print(f"Info: Using '{actual_time_var}' for Time column '{time_var}'.")
+            else:
+                avail = ", ".join(list(lf.columns)[:10])
+                if len(lf.columns) > 10: avail += "..."
+                raise ValueError(f"Time column '{time_var}' not found.\nAvailable: {avail}")
+
+        has_series = "Series_Name" in lf.columns
+        id_vars = [actual_id_var] + (["Series_Name"] if has_series else [])
+        drop_cols = [c for c in ["Country_Code", "Series_Code"] if c in lf.columns]
+        if drop_cols:
+            lf = lf.drop(drop_cols)
+
+        value_vars = [c for c in lf.columns if c not in id_vars]
+        if not value_vars:
+            raise ValueError("No value columns found to unpivot.")
+
+        lf = lf.unpivot(index=id_vars, on=value_vars, variable_name=actual_time_var, value_name="Value")
+        lf = lf.with_columns([
+            pl.col(actual_time_var).cast(pl.Utf8).str.extract(r"(\d{4})").cast(pl.Int32, strict=False).alias(actual_time_var),
+            pl.when(pl.col("Value") == "..").then(None).otherwise(pl.col("Value")).cast(pl.Float64, strict=False).alias("Value")
+        ])
+
+        if has_series:
+            lf = lf.rename({"Series_Name": "Series"})
+            lf = lf.pivot(values="Value", index=[actual_id_var, actual_time_var], on="Series", aggregate_function="mean")
+            p_schema = lf.columns if isinstance(lf, pl.DataFrame) else collect_with_engine(lf.head(0)).columns
+            p_new = sanitise(p_schema)
+            lf = lf.rename(dict(zip(p_schema, p_new)))
+
+        if isinstance(lf, pl.LazyFrame):
+            try:
+                return collect_with_engine(lf)
+            except Exception as e:
+                print(f"Streaming failed, falling back to eager: {e}")
+                return lf.collect()
+        return lf
+
+    finally:
+        if temp_parquet_path and os.path.exists(temp_parquet_path):
+            try:
+                os.remove(temp_parquet_path)
+            except Exception:
+                pass
+
+def write(df, base, fmt, stata_version, overwrite=False):
+    pdf = df.to_pandas()
+    
+    # Rename time column to 'year' (lowercase) for consistency
+    time_col_found = False
+    for col in pdf.columns:
+        if col.lower() in ["year", "time", "date"] or (col.startswith("v_") and any(c.isdigit() for c in col)):
+            if col != "year":
+                pdf = pdf.rename(columns={col: "year"})
+                time_col_found = True
+            break
+    
+    output_path = base + "." + fmt
+    
+    if os.path.exists(output_path) and not overwrite:
+        print(f"Skipping {output_path}: File already exists. Use --overwrite.")
+        del pdf
+        gc.collect()
+        return
+
+    try:
+        if fmt == "dta":
+            try: pyreadstat.write_dta(pdf, output_path, version=stata_version)
+            except: pyreadstat.write_dta(pdf, output_path)
+        elif fmt == "sav":
+            pyreadstat.write_sav(pdf, output_path)
+        elif fmt == "rdata":
+            with localconverter(ro.default_converter + pandas2ri.converter):
+                ro.globalenv["df"] = pdf
+            ro.r(f"save(df, file='{output_path.replace(chr(39), chr(92)+chr(39))}')")
     except Exception as e:
-        print_err(f"previewing file {file_path}: {e}")
-
-
-def confirm_overwrite_or_rename(
-    output_file, quiet=False, overwrite=False, rename=False
-):
-    if overwrite:
-        return True
-
-    if rename:
-        if os.path.exists(output_file):
-            base, ext = os.path.splitext(output_file)
-            counter = 1
-            new_file = f"{base}_{counter}{ext}"
-            while os.path.exists(new_file):
-                counter += 1
-                new_file = f"{base}_{counter}{ext}"
-            if not quiet:
-                print_warn(f"Autorenaming {output_file} -> {new_file}")
-            return new_file
-        return True
-
-    if os.path.exists(output_file):
-        user_input = (
-            input(
-                f"The file {output_file} exists. "
-                "Do you want to (O)verwrite, (R)ename, or (S)kip? (O/R/S): "
-            )
-            .strip()
-            .lower()
-        )
-
-        if user_input == "o":
-            return True
-        elif user_input == "r":
-            base, ext = os.path.splitext(output_file)
-            counter = 1
-            new_file = f"{base}_{counter}{ext}"
-            while os.path.exists(new_file):
-                counter += 1
-                new_file = f"{base}_{counter}{ext}"
-            print(f"Renaming to {new_file}")
-            return new_file
-        elif user_input == "s":
-            print(f"Skipping {output_file}")
-            return None
-        else:
-            print("Invalid choice. Skipping.")
-            return None
-
-    return True
-
-
-def hausman_test(
-    df,
-    id_var="Country",
-    time_var="Year",
-    dependent_vars=None,
-    independent_vars=None,
-    quiet=False,
-):
-    if not {id_var, time_var}.issubset(df.columns):
-        raise ValueError(
-            f"Columns '{id_var}' and/or '{time_var}' not found in DataFrame."
-        )
-
-    df = df.set_index([id_var, time_var])
-
-    # Detect dependent variables if not provided
-    if dependent_vars is None:
-        dependent_vars = [
-            c
-            for c in df.select_dtypes(include=[np.number]).columns
-            if c not in [id_var, time_var]
-        ]
-
-    for dep in dependent_vars:
-        # Skip if dependent variable is also an independent variable
-        if independent_vars and dep in independent_vars:
-            print_warn(
-                f"Skipping Hausman test for {dep}: dependent variable identical to independent variable."
-            )
-            continue
-
-        df_sub = df.dropna(subset=[dep])
-
-        # Identify independent variables
-        x_vars = (
-            independent_vars
-            if independent_vars
-            else [c for c in df_sub.columns if c != dep]
-        )
-
-        if len(x_vars) == 0:
-            print_warn(f"Skipping {dep}: no independent variables available.")
-            continue
-
-        print_ok(f"\nRunning Hausman test for dependent variable: {dep}")
-        print(f"Independent variables used: {x_vars}")
-
-        # Fixed effects (within estimator)
-        df_grouped = df_sub.groupby(level=0)
-        df_fe = df_sub - df_grouped.transform("mean")
-        y_fe = df_fe[dep]
-        X_fe = sm.add_constant(df_fe[x_vars])
-        fe_model = sm.OLS(y_fe, X_fe, missing="drop").fit()
-
-        # Random effects (pooled OLS)
-        y_re = df_sub[dep]
-        X_re = sm.add_constant(df_sub[x_vars])
-        re_model = sm.OLS(y_re, X_re, missing="drop").fit()
-
-        # Hausman statistic
-        diff = fe_model.params - re_model.params
-        cov_diff = fe_model.cov_params() - re_model.cov_params()
-
-        try:
-            H = np.dot(diff.T, np.linalg.inv(cov_diff)).dot(diff)
-            dfree = len(diff)
-            pval = chi2.sf(H, dfree)
-        except np.linalg.LinAlgError:
-            print_err(f"Covariance matrix not invertible for {dep} — test skipped.")
-            continue
-
-        print(f"Hausman statistic = {H:.3f}, df = {dfree}, p = {pval:.4f}")
-        if pval < 0.05:
-            print_ok(f"Fixed effects preferred for {dep} (p < 0.05)")
-        else:
-            print_ok(f"Random effects preferred for {dep} (p ≥ 0.05)")
-
-
-# CLI
-
+        print(f"Error writing {output_path}: {e}")
+    finally:
+        del pdf
+        gc.collect()
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Convert World Bank OpenData CSV/Excel to panel dataset in STATA (default), SPSS and/or R format(s). Compatible with default DataBank layout."
-    )
-
-    # Modify input_file to accept multiple files
-    parser.add_argument("input_files", nargs="*", help="Input CSV/Excel file(s)")
-    parser.add_argument(
-        "--pdat",
-        action="store_true",
-        help='Load all Excel files starting with "P_Data_Extract_From_" in current directory',
-    )
-    parser.add_argument(
-        "--pdat-dir",
-        help='Directory to search for "P_Data_Extract_From_*.xlsx"',
-    )
-    parser.add_argument(
-        "--pdat-zip",
-        action="store_true",
-        help='Load ZIP files starting with "P_Data_Extract_From_" and extract CSVs (excluding Metadata CSV)',
-    )
-    parser.add_argument("--sav", action="store_true", help="Output SPSS/PSPP .sav file")
-    parser.add_argument("--rdata", action="store_true", help="Output R .RData file")
-    parser.add_argument("--all", action="store_true", help="Output all formats")
-    parser.add_argument(
-        "--out",
-        nargs="*",
-        help="Specify output filename(s)",
-    )
-    parser.add_argument(
-        "--id",
-        default="Country",
-        help="Specify entity (default: Country; 'Country Name' changed to 'Country' automatically)",
-    )
-    parser.add_argument(
-        "--time",
-        default="Year",
-        help="Specify time variable (default: Year; Letters etc. removed from variable)",
-    )
-    parser.add_argument(
-        "--stata",
-        type=int,
-        default=15,
-        help="Specify STATA version .dta output (8–15) (default: 15; STATA can read .dta files prepared for older versions)",
-    )
-    parser.add_argument(
-        "--license", action="store_true", help="This software's license information"
-    )
-    parser.add_argument(
-        "--quiet",
-        action="store_true",
-        help="Suppress stdout unless user input is required",
-    )
-    parser.add_argument(
-        "--overwrite", action="store_true", help="Overwrite file(s) without prompting"
-    )
-    parser.add_argument(
-        "--rename",
-        action="store_true",
-        help="Autorename existing output file(s) without prompting",
-    )
-    parser.add_argument(
-        "--preview",
-        nargs="?",
-        const=5,
-        type=int,
-        help="Print first 5 (default) lines of output file(s) to stdout",
-    )
-    parser.add_argument(
-        "--hausman",
-        action="store_true",
-        help=(
-            "Iteratively run Hausman test(s) with each variable as dependent against all others"
-        ),
-    )
-    parser.add_argument(
-        "--dep",
-        help="Specify post-sanitised dependent variable name for Hausman test(s)",
-    )
-    parser.add_argument(
-        "--indep",
-        nargs="+",
-        help="Specify post-sanitised independent variable name(s) for Hausman test(s)",
-    )
-
-    args = parser.parse_args()
-    quiet = args.quiet
-    overwrite = args.overwrite
-    rename = args.rename
+    p = argparse.ArgumentParser(description="WB Data Converter (Safe, Efficient & Robust)")
+    p.add_argument("files", nargs="*", help="Input files (CSV/Excel)")
+    p.add_argument("--sav", action="store_true", help="Output SPSS (.sav)")
+    p.add_argument("--rdata", action="store_true", help="Output R (.RData)")
+    p.add_argument("--all", action="store_true", help="Output all formats")
+    p.add_argument("--out", nargs="*", help="Output filenames (must match input count)")
+    p.add_argument("--id", default="Country", help="ID variable name")
+    p.add_argument("--time", default="Year", help="Time variable name")
+    p.add_argument("--stata", type=int, default=15, help="STATA .dta version (11-15)")
+    p.add_argument("--threshold", type=int, default=DEFAULT_LAZY_THRESHOLD, help="Size (MB) to switch to lazy mode")
+    # Renamed flag to --parquet
+    p.add_argument("--parquet", type=int, default=DEFAULT_PARQUET_THRESHOLD, help="Size (MB) to use Parquet Intermediate")
+    p.add_argument("--overwrite", action="store_true", help="Overwrite existing output files")
+    p.add_argument("--license", action="store_true", help="Display licence and exit")
+    
+    args = p.parse_args()
 
     if args.license:
-        print(__doc__)
-        return
+        print(LICENSE_TEXT)
+        sys.exit(0)
 
-    discovered_files = []
-    extracted_csvs = []
+    if not args.files:
+        p.print_help()
+        sys.exit("Error: No input files provided. Use --license to view license or provide files.")
 
-    if args.pdat or args.pdat_dir:
-        search_dir = args.pdat_dir if args.pdat_dir else "."
-        for f in os.listdir(search_dir):
-            if f.startswith("P_Data_Extract_From_") and f.endswith(".xlsx"):
-                discovered_files.append(os.path.join(search_dir, f))
-        if not discovered_files and args.pdat:
-            print_err(f"No matching PDAT files found in {search_dir}")
-            return
+    if args.out and len(args.out) != len(args.files):
+        sys.exit("Error: Number of output files (--out) must match number of input files.")
 
-    if args.pdat_zip:
-        search_dir = args.pdat_dir if args.pdat_dir else "."
-        for f in os.listdir(search_dir):
-            if f.startswith("P_Data_Extract_From_") and f.endswith(".zip"):
-                zip_path = os.path.join(search_dir, f)
-                try:
-                    with zipfile.ZipFile(zip_path, "r") as z:
-                        tmp_dir = tempfile.mkdtemp(prefix="pdat_zip_")
-                        for name in z.namelist():
-                            if (
-                                name.lower().endswith(".csv")
-                                and "metadata" not in name.lower()
-                            ):
-                                extracted_path = os.path.join(
-                                    tmp_dir, os.path.basename(name)
-                                )
-                                z.extract(name, tmp_dir)
-                                # Move file to the expected path
-                                actual_extracted = os.path.join(tmp_dir, name)
-                                if os.path.exists(actual_extracted):
-                                    os.rename(actual_extracted, extracted_path)
-                                extracted_csvs.append(extracted_path)
-                                if not quiet:
-                                    print(f"Extracted CSV: {extracted_path}")
-                except Exception as e:
-                    print_err(f"Failed reading ZIP {zip_path}: {e}", quiet=quiet)
-
-    input_files = args.input_files + discovered_files + extracted_csvs
-    if not input_files:
-        parser.print_help()
-        return
-
-    missing_files = [f for f in input_files if not os.path.isfile(f)]
-    if missing_files:
-        print_err(
-            f"The following input file(s) do not exist: {', '.join(missing_files)}"
-        )
-        return
-
-    if args.out and len(args.out) != len(input_files):
-        print_err("Number of --out filenames must match number of input files")
-        return
-
-    if args.all:
-        formats = ["dta", "sav", "rdata"]
+    formats = ["dta"]
+    if args.all: formats = ["dta", "sav", "rdata"]
     else:
-        formats = []
-        if args.sav:
-            formats.append("sav")
-        if args.rdata:
-            formats.append("rdata")
-        if not formats:
-            formats.append("dta")
+        if args.sav: formats.append("sav")
+        if args.rdata: formats.append("rdata")
 
-    for i, input_file in enumerate(input_files):
-        print_ok(f"Processing file: {input_file}", quiet)
-        base_name = (
-            args.out[i]
-            if args.out
-            else os.path.splitext(os.path.basename(input_file))[0]
-        )
-
-        df = convert_dataframe(
-            input_file, id_var=args.id, time_var=args.time, quiet=quiet
-        )
-
-        if args.hausman:
-            dep_vars = [args.dep] if args.dep else None
-            indep_vars = args.indep if args.indep else None
-            try:
-                hausman_test(
-                    df,
-                    id_var=args.id,
-                    time_var=args.time,
-                    dependent_vars=dep_vars,
-                    independent_vars=indep_vars,
-                    quiet=quiet,
-                )
-            except Exception as e:
-                print_err(f"Hausman test failed: {e}", quiet)
-
-        for fmt in formats:
-            ext_map = {"dta": ".dta", "sav": ".sav", "rdata": ".RData"}
-            output_file = base_name + ext_map[fmt]
-            result = confirm_overwrite_or_rename(
-                output_file, quiet=quiet, overwrite=overwrite, rename=rename
-            )
-            if result is None:
-                continue
-            if result is True:
-                out_path = output_file
-            else:
-                out_path = result
-
-            if fmt == "dta":
-                convert_to_stata(
-                    df,
-                    out_path,
-                    id_var=args.id,
-                    time_var=args.time,
-                    stata_version=args.stata,
-                    quiet=quiet,
-                    overwrite=overwrite,
-                )
-            elif fmt == "sav":
-                convert_to_spss(df, out_path, quiet=quiet, overwrite=overwrite)
-            elif fmt == "rdata":
-                convert_to_rdata(df, out_path, quiet=quiet, overwrite=overwrite)
-
-            if args.preview is not None:
-                preview_file(out_path, num_rows=args.preview)
-
-    print_ok("All files processed", quiet)
-
+    for i, f in enumerate(args.files):
+        try:
+            # Pass args.parquet instead of args.intermediate_threshold
+            df = process_file(f, args.id, args.time, args.threshold, args.parquet)
+            if df is None: continue
+            
+            base = args.out[i] if args.out else os.path.splitext(f)[0]
+            for fmt in formats:
+                write(df, base, fmt, args.stata, overwrite=args.overwrite)
+            
+            print(f"Done: {f}")
+            del df
+            gc.collect()
+        except Exception as e:
+            print(f"Error processing {f}: {e}")
+            continue
 
 if __name__ == "__main__":
     main()
