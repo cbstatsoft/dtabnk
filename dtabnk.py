@@ -31,7 +31,6 @@ import rpy2.robjects as ro
 from rpy2.robjects import pandas2ri
 from rpy2.robjects.conversion import localconverter
 
-# Default thresholds (in MB)
 DEFAULT_LAZY_THRESHOLD = 100
 DEFAULT_PARQUET_THRESHOLD = 500
 
@@ -113,7 +112,6 @@ def process_file(path, id_var, time_var, lazy_thresh, parquet_thresh):
     temp_parquet_path = None
 
     try:
-        # --- STRATEGY 1: Parquet Intermediate for Large Files ---
         if use_parquet:
             print(f"Large file ({file_size / 1024 / 1024:.1f} MB). Using Parquet Intermediate for efficiency...")
             temp_parquet_path = path + ".parquet.tmp"
@@ -138,7 +136,6 @@ def process_file(path, id_var, time_var, lazy_thresh, parquet_thresh):
                 print(f"Parquet intermediate failed: {e}. Falling back.")
                 lf = None
 
-        # --- STRATEGY 2: Standard Loading ---
         if lf is None:
             if ext == ".csv":
                 if use_lazy:
@@ -157,7 +154,6 @@ def process_file(path, id_var, time_var, lazy_thresh, parquet_thresh):
             else:
                 raise ValueError("Unsupported format")
 
-        # --- COMMON PROCESSING ---
         
         if isinstance(lf, pl.LazyFrame):
             df_temp = collect_with_engine(lf)
@@ -240,7 +236,6 @@ def process_file(path, id_var, time_var, lazy_thresh, parquet_thresh):
 def write(df, base, fmt, stata_version, overwrite=False):
     pdf = df.to_pandas()
     
-    # Rename time column to 'year' (lowercase) for consistency
     time_col_found = False
     for col in pdf.columns:
         if col.lower() in ["year", "time", "date"] or (col.startswith("v_") and any(c.isdigit() for c in col)):
@@ -284,7 +279,6 @@ def main():
     p.add_argument("--time", default="Year", help="Time variable name")
     p.add_argument("--stata", type=int, default=15, help="STATA .dta version (11-15)")
     p.add_argument("--threshold", type=int, default=DEFAULT_LAZY_THRESHOLD, help="Size (MB) to switch to lazy mode")
-    # Renamed flag to --parquet
     p.add_argument("--parquet", type=int, default=DEFAULT_PARQUET_THRESHOLD, help="Size (MB) to use Parquet Intermediate")
     p.add_argument("--overwrite", action="store_true", help="Overwrite existing output files")
     p.add_argument("--license", action="store_true", help="Display licence and exit")
@@ -310,7 +304,6 @@ def main():
 
     for i, f in enumerate(args.files):
         try:
-            # Pass args.parquet instead of args.intermediate_threshold
             df = process_file(f, args.id, args.time, args.threshold, args.parquet)
             if df is None: continue
             
