@@ -11,10 +11,10 @@
 - **Variable Sanitisation**: Cleans column names (e.g., `'US$'` → `'USD'`, `'%'` → `'pct'`, `' '` → `'_'`).
 - **Flexible Mapping**: Supports custom entity (`--id`) and time (`--time`) variable names with intelligent fallback detection.
 
-### Performance & Memory Optimization
+### Performance & Memory Optimisation
 - **Parquet Intermediate**: For files >500MB, automatically converts `.xlsx`/`.xls` to a compressed Parquet file first to drastically reduce memory usage and I/O time during processing.
 - **Lazy Loading**: Uses `Polars`' streaming engine for `.csv`files >100MB to process datasets larger than available RAM.
-- **Eager Loading**: Uses fast, direct loading for smaller files (<100MB) to minimize overhead.
+- **Eager Loading**: Uses fast, direct loading for smaller files (<100MB) to minimise overhead.
 
 ### Data Cleaning
 - **Footer Metadata Stripping**: Automatically detects and removes World Bank footer lines (e.g., "Data from database:...", "Last Updated:...").
