@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# wb_data_converter.py
 # (C) Connor Baird 2026
 # GNU GPL-3.0-or-later
 
@@ -1121,7 +1120,7 @@ def main() -> None:
 
     if not args.files:
         raise SystemExit(
-            "Error: no input files provided. Use --license to view licence or provide files."
+            "Error: no input files provided. Use -h to view help."
         )
 
     if args.out and len(args.out) != len(args.files):
