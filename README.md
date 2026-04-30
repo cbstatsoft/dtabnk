@@ -75,7 +75,7 @@ dtabnk data.csv
 dtabnk data.csv --all
 
 # Convert multiple files with custom output names
-dtabnk data.csv data.xlsx --out oingo boingo
+dtabnk data1.csv data2.xlsx --out oingo boingo
 
 # Convert to STATA version 13 format
 dtabnk data.csv --stata 13
@@ -95,7 +95,7 @@ dtabnk data.csv --preview
 # Force overwrite of existing output files
 dtabnk data.csv --overwrite
 
-# Process a large file with Parquet Intermediate
+# Process a large file with Parquet intermediate
 dtabnk huge_data.xlsx --parquet 500 --all
 
 # View licence information
@@ -103,4 +103,4 @@ dtabnk --license
 ```
 ---
 
-(C) 2026 Connor Baird
+🄯 Connor Baird, 2026
