@@ -13,7 +13,7 @@ import os
 import re
 import subprocess
 import sys
-from typing import Iterable
+from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 
 REQ = ["polars", "pyreadstat", "rpy2", "openpyxl", "fastexcel", "psutil"]
 
@@ -59,7 +59,7 @@ programme. If not, see <https://www.gnu.org/licenses/>.
 
 
 def ensure_dependencies() -> None:
-    missing: list[str] = []
+    missing: List[str] = []
     for package in REQ:
         try:
             __import__(package)
@@ -69,11 +69,11 @@ def ensure_dependencies() -> None:
     if not missing:
         return
 
-    print(f"Installing missing packages: {', '.join(missing)}...")
+    print("Installing missing packages: {}...".format(", ".join(missing)))
     try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", *missing])
+        subprocess.check_call([sys.executable, "-m", "pip", "install"] + missing)
     except subprocess.CalledProcessError as exc:
-        sys.exit(f"Failed to install dependencies: {exc}")
+        sys.exit("Failed to install dependencies: {}".format(exc))
 
 
 ensure_dependencies()
@@ -90,7 +90,7 @@ try:
 except Exception:
     pass
 
-FrameLike = pl.DataFrame | pl.LazyFrame
+FrameLike = Union[pl.DataFrame, pl.LazyFrame]
 
 
 def get_available_ram_mb() -> int:
@@ -100,22 +100,28 @@ def get_available_ram_mb() -> int:
 
 def derive_memory_policy(
     file_size_bytes: int,
-    lazy_thresh_mb: int | None = None,
-    parquet_thresh_mb: int | None = None,
+    lazy_thresh_mb: Optional[int] = None,
+    parquet_thresh_mb: Optional[int] = None,
     safe_mode: bool = False,
-) -> dict[str, int | bool]:
+) -> Dict[str, Union[int, bool]]:
     avail_mb = get_available_ram_mb()
-    file_mb = max(1, math.ceil(file_size_bytes / (1024 * 1024)))
+    file_mb = max(1, int(math.ceil(file_size_bytes / (1024 * 1024))))
 
-    dynamic_lazy_mb = lazy_thresh_mb if lazy_thresh_mb is not None else max(
-        32, int(avail_mb * (0.05 if safe_mode else 0.10))
+    dynamic_lazy_mb = (
+        lazy_thresh_mb
+        if lazy_thresh_mb is not None
+        else max(32, int(avail_mb * (0.05 if safe_mode else 0.10)))
     )
-    dynamic_parquet_mb = parquet_thresh_mb if parquet_thresh_mb is not None else max(
-        64, int(avail_mb * (0.10 if safe_mode else 0.25))
+    dynamic_parquet_mb = (
+        parquet_thresh_mb
+        if parquet_thresh_mb is not None
+        else max(64, int(avail_mb * (0.10 if safe_mode else 0.25)))
     )
 
     use_lazy = file_mb >= dynamic_lazy_mb
-    use_parquet = file_mb >= dynamic_parquet_mb or avail_mb < (3072 if safe_mode else 2048)
+    use_parquet = file_mb >= dynamic_parquet_mb or avail_mb < (
+        3072 if safe_mode else 2048
+    )
 
     return {
         "avail_mb": avail_mb,
@@ -140,8 +146,12 @@ def ensure_memory_headroom(
 
     if avail_mb - needed_mb < reserve_mb:
         raise MemoryError(
-            f"Refusing {stage}: available RAM ~{avail_mb} MB, "
-            f"estimated need ~{needed_mb} MB, reserve floor {reserve_mb} MB."
+            "Refusing {}: available RAM ~{} MB, estimated need ~{} MB, reserve floor {} MB.".format(
+                stage,
+                avail_mb,
+                needed_mb,
+                reserve_mb,
+            )
         )
 
 
@@ -166,60 +176,10 @@ def find_header_row(path: str, delimiter: str = ",") -> int:
     return 0
 
 
-def get_skip_rows(path: str, delimiter: str, header_row_override: int | None) -> int:
+def get_skip_rows(path: str, delimiter: str, header_row_override: Optional[int]) -> int:
     if header_row_override is not None:
         return max(0, header_row_override)
     return find_header_row(path, delimiter=delimiter)
-
-
-def strip_bottom_metadata(frame: FrameLike) -> FrameLike:
-    cols = get_columns(frame)
-    if not cols:
-        return frame
-
-    first_col = cols[0]
-    return frame.filter(
-        ~pl.col(first_col)
-        .cast(pl.Utf8, strict=False)
-        .fill_null("")
-        .str.contains(r"(?i)^(Data from database:|Last Updated:)")
-    )
-
-
-def sanitise(columns: Iterable[str], max_len: int = 64) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-
-    for raw in columns:
-        col = str(raw).strip().replace(" ", "_")
-        col = col.replace("%", "pct").replace("US$", "USD").replace("$", "USD")
-        col = "".join(ch for ch in col if ch.isalnum() or ch == "_")
-
-        if not col:
-            col = "v"
-        if not col[0].isalpha():
-            col = f"v_{col}"
-
-        col = col[:max_len].rstrip("_") or "v"
-        base = col
-        i = 1
-        while col in seen:
-            suffix = f"_{i}"
-            col = f"{base[: max_len - len(suffix)]}{suffix}".rstrip("_")
-            i += 1
-
-        seen.add(col)
-        out.append(col)
-
-    return out
-
-
-def sanitise_one(name: str) -> str:
-    return sanitise([name])[0]
-
-
-def is_year_like(name: str) -> bool:
-    return re.search(r"(19|20)\d{2}", str(name)) is not None
 
 
 def collect_with_engine(lf: pl.LazyFrame) -> pl.DataFrame:
@@ -237,40 +197,98 @@ def collect_frame(frame: FrameLike) -> pl.DataFrame:
     return frame
 
 
-def get_columns(frame: FrameLike) -> list[str]:
+def get_columns(frame: FrameLike) -> List[str]:
     if isinstance(frame, pl.LazyFrame):
         return frame.collect_schema().names()
     return list(frame.columns)
 
 
+def estimate_frame_bytes(frame: FrameLike, fallback_bytes: int) -> int:
+    if isinstance(frame, pl.DataFrame):
+        return max(frame.estimated_size(), 1)
+    return max(fallback_bytes, 1)
+
+
+def strip_bottom_metadata(frame: FrameLike) -> FrameLike:
+    cols = get_columns(frame)
+    if not cols:
+        return frame
+
+    first_col = cols[0]
+    return frame.filter(
+        ~pl.col(first_col)
+        .cast(pl.Utf8, strict=False)
+        .fill_null("")
+        .str.contains(r"(?i)^(Data from database:|Last Updated:)")
+    )
+
+
+def sanitise(columns: Iterable[str], max_len: int = 64) -> List[str]:
+    seen = set()
+    out = []
+
+    for raw in columns:
+        col = str(raw).strip().replace(" ", "_")
+        col = col.replace("%", "pct").replace("US$", "USD").replace("$", "USD")
+        col = "".join(ch for ch in col if ch.isalnum() or ch == "_")
+
+        if not col:
+            col = "v"
+        if not col[0].isalpha():
+            col = "v_{}".format(col)
+
+        col = col[:max_len].rstrip("_") or "v"
+        base = col
+        i = 1
+        while col in seen:
+            suffix = "_{}".format(i)
+            col = "{}{}".format(base[: max_len - len(suffix)], suffix).rstrip("_")
+            i += 1
+
+        seen.add(col)
+        out.append(col)
+
+    return out
+
+
+def sanitise_one(name: str) -> str:
+    return sanitise([name])[0]
+
+
+def is_year_like(name: str) -> bool:
+    return re.search(r"(19|20)\d{2}", str(name)) is not None
+
+
 def read_excel_compat(path: str) -> pl.DataFrame:
-    errors: list[str] = []
+    errors: List[str] = []
 
     for engine in ("calamine", "openpyxl"):
         try:
             return pl.read_excel(path, engine=engine)
         except Exception as exc:
-            errors.append(f"{engine}: {exc}")
+            errors.append("{}: {}".format(engine, exc))
 
     try:
         return pl.read_excel(path)
     except Exception as exc:
-        errors.append(f"default: {exc}")
+        errors.append("default: {}".format(exc))
 
     raise RuntimeError("Failed to read Excel file. " + " | ".join(errors[-3:]))
 
 
 def read_source(
     path: str,
-    lazy_thresh_mb: int | None,
-    parquet_thresh_mb: int | None,
+    lazy_thresh_mb: Optional[int],
+    parquet_thresh_mb: Optional[int],
     safe_mode: bool,
     delimiter: str,
-    header_row_override: int | None,
-) -> tuple[FrameLike, str | None, dict[str, int | bool]]:
+    header_row_override: Optional[int],
+) -> Tuple[FrameLike, Optional[str], Dict[str, Union[int, bool]]]:
     ext = os.path.splitext(path)[1].lower()
     file_size = os.path.getsize(path)
-    skip_rows = get_skip_rows(path, delimiter, header_row_override) if ext == ".csv" else 0
+    skip_rows = (
+        get_skip_rows(path, delimiter, header_row_override) if ext == ".csv" else 0
+    )
 
     policy = derive_memory_policy(
         file_size_bytes=file_size,
@@ -280,23 +298,26 @@ def read_source(
     )
 
     print(
-        f"Available RAM: {policy['avail_mb']} MB | "
-        f"File: {policy['file_mb']} MB | "
-        f"Lazy threshold: {policy['lazy_thresh_mb']} MB | "
-        f"Parquet threshold: {policy['parquet_thresh_mb']} MB"
+        "Available RAM: {} MB | File: {} MB | Lazy threshold: {} MB | Parquet threshold: {} MB".format(
+            policy["avail_mb"],
+            policy["file_mb"],
+            policy["lazy_thresh_mb"],
+            policy["parquet_thresh_mb"],
+        )
     )
 
     use_lazy = bool(policy["use_lazy"])
     use_parquet = bool(policy["use_parquet"])
-    temp_parquet_path: str | None = None
+    temp_parquet_path = None
 
     if ext == ".csv" and use_parquet:
         print(
-            f"Large file ({file_size / 1024 / 1024:.1f} MB). "
-            "Using streaming CSV -> Parquet intermediate..."
+            "Large file ({:.1f} MB). Using streaming CSV -> Parquet intermediate...".format(
+                file_size / 1024 / 1024
+            )
         )
 
-        temp_parquet_path = f"{path}.parquet.tmp"
+        temp_parquet_path = "{}.parquet.tmp".format(path)
 
         try:
             lf = pl.scan_csv(
@@ -310,7 +331,9 @@ def read_source(
             print("Parquet intermediate conversion complete.")
             return strip_bottom_metadata(frame), temp_parquet_path, policy
         except Exception as exc:
-            print(f"Streaming Parquet intermediate failed: {exc}. Falling back.")
+            print(
+                "Streaming Parquet intermediate failed: {}. Falling back.".format(exc)
+            )
             if os.path.exists(temp_parquet_path):
                 try:
                     os.remove(temp_parquet_path)
@@ -320,8 +343,9 @@ def read_source(
 
     if use_parquet:
         print(
-            f"Large file ({file_size / 1024 / 1024:.1f} MB). "
-            "Using Parquet intermediate for efficiency..."
+            "Large file ({:.1f} MB). Using Parquet intermediate for efficiency...".format(
+                file_size / 1024 / 1024
+            )
         )
 
         ensure_memory_headroom(
@@ -332,7 +356,7 @@ def read_source(
             safe_mode=safe_mode,
         )
 
-        temp_parquet_path = f"{path}.parquet.tmp"
+        temp_parquet_path = "{}.parquet.tmp".format(path)
 
         if ext == ".csv":
             df_src = pl.read_csv(
@@ -344,7 +368,7 @@ def read_source(
         elif ext in {".xlsx", ".xls"}:
             df_src = read_excel_compat(path)
         else:
-            raise ValueError(f"Unsupported format: {ext}")
+            raise ValueError("Unsupported format: {}".format(ext))
 
         df_src = collect_frame(strip_bottom_metadata(df_src))
         df_src.write_parquet(temp_parquet_path, compression="zstd")
@@ -407,14 +431,14 @@ def read_source(
         frame = read_excel_compat(path)
         return strip_bottom_metadata(frame), None, policy
 
-    raise ValueError(f"Unsupported format: {ext}")
+    raise ValueError("Unsupported format: {}".format(ext))
 
 
 def find_column_name(
     frame: FrameLike,
-    candidates: list[str] | tuple[str, ...],
-    exclude: set[str] | None = None,
-) -> str | None:
+    candidates: Union[List[str], Tuple[str, ...]],
+    exclude: Optional[Set[str]] = None,
+) -> Optional[str]:
     excluded = exclude or set()
     columns = get_columns(frame)
     normalised = [sanitise_one(c) for c in candidates if c]
@@ -434,13 +458,13 @@ def find_column_name(
 
 def resolve_column_name(
     frame: FrameLike,
-    requested: str | None = None,
-    fallbacks: list[str] | tuple[str, ...] | None = None,
-    exclude: set[str] | None = None,
+    requested: Optional[str] = None,
+    fallbacks: Optional[Union[List[str], Tuple[str, ...]]] = None,
+    exclude: Optional[Set[str]] = None,
     required: bool = True,
     label: str = "column",
-) -> str | None:
-    candidates: list[str] = []
+) -> Optional[str]:
+    candidates = []
     if requested:
         candidates.append(requested)
     if fallbacks:
@@ -449,26 +473,33 @@ def resolve_column_name(
     hit = find_column_name(frame, candidates, exclude=exclude)
     if hit is not None:
         if requested and hit != sanitise_one(requested):
-            print(f"Info: Using '{hit}' for {label} '{requested}'.")
+            print("Info: Using '{}' for {} '{}'.".format(hit, label, requested))
         return hit
 
     if not required:
         return None
 
-    available = ", ".join(get_columns(frame)[:20])
-    if len(get_columns(frame)) > 20:
+    columns = get_columns(frame)
+    available = ", ".join(columns[:20])
+    if len(columns) > 20:
         available += ", ..."
-    requested_text = requested if requested else "/".join(candidates) if candidates else label
-    raise ValueError(f"{label.capitalize()} '{requested_text}' not found. Available: {available}")
+    requested_text = (
+        requested if requested else "/".join(candidates) if candidates else label
+    )
+    raise ValueError(
+        "{} '{}' not found. Available: {}".format(
+            label.capitalize(), requested_text, available
+        )
+    )
 
 
 def resolve_id_column(
     frame: FrameLike,
     requested_id: str,
-    exclude: set[str] | None = None,
+    exclude: Optional[Set[str]] = None,
 ) -> str:
     requested_norm = sanitise_one(requested_id)
-    fallbacks: list[str] = []
+    fallbacks = []
 
     if requested_norm == "Country_Name":
         fallbacks = ["Country"]
@@ -493,18 +524,18 @@ def resolve_id_column(
         if col in {"Year", "Value", "Series", "Series_Name"}:
             continue
         if not is_year_like(col):
-            print(f"Info: Using '{col}' as ID column.")
+            print("Info: Using '{}' as ID column.".format(col))
             return col
 
     available = ", ".join(get_columns(frame)[:20])
-    raise ValueError(f"Unable to resolve ID column. Available: {available}")
+    raise ValueError("Unable to resolve ID column. Available: {}".format(available))
 
 
 def detect_layout(
     frame: FrameLike,
     requested_layout: str,
-    year_col: str | None,
-    value_col: str | None,
+    year_col: Optional[str],
+    value_col: Optional[str],
 ) -> str:
     if requested_layout != "auto":
         return requested_layout
@@ -525,7 +556,9 @@ def detect_layout(
     return "wide"
 
 
-def cast_year_and_value(frame: FrameLike, year_col: str, value_col: str = "Value") -> FrameLike:
+def cast_year_and_value(
+    frame: FrameLike, year_col: str, value_col: str = "Value"
+) -> FrameLike:
     return frame.with_columns(
         [
             pl.col(year_col)
@@ -542,11 +575,36 @@ def cast_year_and_value(frame: FrameLike, year_col: str, value_col: str = "Value
     ).filter(pl.col(year_col).is_not_null())
 
 
+def pivot_eager(
+    frame: FrameLike,
+    index: List[str],
+    columns: str,
+    values: str,
+    aggregate_function: str = "mean",
+) -> pl.DataFrame:
+    df = collect_frame(frame)
+
+    try:
+        return df.pivot(
+            on=columns,
+            index=index,
+            values=values,
+            aggregate_function=aggregate_function,
+        )
+    except TypeError:
+        return df.pivot(
+            index=index,
+            columns=columns,
+            values=values,
+            aggregate_function=aggregate_function,
+        )
+
+
 def process_wide_layout(
     frame: FrameLike,
     file_size: int,
     id_var: str,
-    series_col_arg: str | None,
+    series_col_arg: Optional[str],
     min_free_ram_mb: int,
     safe_mode: bool,
 ) -> pl.DataFrame:
@@ -574,7 +632,11 @@ def process_wide_layout(
     value_vars = [c for c in get_columns(frame) if c not in id_vars and is_year_like(c)]
     if not value_vars:
         available = ", ".join(get_columns(frame)[:20])
-        raise ValueError(f"No year-like value columns found to unpivot. Available columns: {available}")
+        raise ValueError(
+            "No year-like value columns found to unpivot. Available columns: {}".format(
+                available
+            )
+        )
 
     frame = frame.select(id_vars + value_vars)
 
@@ -603,17 +665,18 @@ def process_wide_layout(
 
         ensure_memory_headroom(
             stage="pivot",
-            input_size_bytes=max(file_size, collect_frame(frame.select(pl.len())).estimated_size()),
+            input_size_bytes=estimate_frame_bytes(frame, fallback_bytes=file_size),
             multiplier=3.5 if safe_mode else 3.0,
             minimum_free_mb=max(min_free_ram_mb, 1024),
             safe_mode=safe_mode,
         )
 
         frame = frame.rename({series_col: "Series"})
-        pivoted = frame.pivot(
-            values="Value",
+        pivoted = pivot_eager(
+            frame=frame,
             index=[actual_id_var, "Year"],
-            on="Series",
+            columns="Series",
+            values="Value",
             aggregate_function="mean",
         )
         pivoted = pivoted.rename(dict(zip(pivoted.columns, sanitise(pivoted.columns))))
@@ -624,16 +687,14 @@ def process_wide_layout(
 
 def process_long_layout(
     frame: FrameLike,
+    file_size: int,
     id_var: str,
-    year_col_arg: str | None,
-    value_col_arg: str | None,
-    series_col_arg: str | None,
+    year_col_arg: Optional[str],
+    value_col_arg: Optional[str],
+    series_col_arg: Optional[str],
     min_free_ram_mb: int,
     safe_mode: bool,
 ) -> pl.DataFrame:
-    _ = min_free_ram_mb
-    _ = safe_mode
-
     columns = get_columns(frame)
     drop_candidates = [c for c in ("Country_Code", "Series_Code") if c in columns]
     if drop_candidates:
@@ -680,15 +741,18 @@ def process_long_layout(
     if "Series" in get_columns(frame):
         ensure_memory_headroom(
             stage="pivot",
-            input_size_bytes=max(collect_frame(frame.select(pl.len())).estimated_size(), 1),
+            input_size_bytes=estimate_frame_bytes(frame, fallback_bytes=file_size),
             multiplier=3.0 if safe_mode else 2.5,
-            minimum_free_mb=max(min_free_ram_mb, 1024 if safe_mode else min_free_ram_mb),
+            minimum_free_mb=max(
+                min_free_ram_mb, 1024 if safe_mode else min_free_ram_mb
+            ),
             safe_mode=safe_mode,
         )
-        pivoted = frame.pivot(
-            values="Value",
+        pivoted = pivot_eager(
+            frame=frame,
             index=[actual_id_var, "Year"],
-            on="Series",
+            columns="Series",
+            values="Value",
             aggregate_function="mean",
         )
         pivoted = pivoted.rename(dict(zip(pivoted.columns, sanitise(pivoted.columns))))
@@ -701,7 +765,7 @@ def process_year_rows_layout(
     frame: FrameLike,
     file_size: int,
     id_var: str,
-    year_col_arg: str | None,
+    year_col_arg: Optional[str],
     min_free_ram_mb: int,
     safe_mode: bool,
 ) -> pl.DataFrame:
@@ -746,15 +810,15 @@ def process_file(
     path: str,
     id_var: str,
     layout: str,
-    year_col: str | None,
-    value_col: str | None,
-    series_col: str | None,
-    lazy_thresh: int | None,
-    parquet_thresh: int | None,
+    year_col: Optional[str],
+    value_col: Optional[str],
+    series_col: Optional[str],
+    lazy_thresh: Optional[int],
+    parquet_thresh: Optional[int],
     min_free_ram_mb: int,
     safe_mode: bool,
     delimiter: str,
-    header_row_override: int | None,
+    header_row_override: Optional[int],
 ) -> pl.DataFrame:
     file_size = os.path.getsize(path)
     frame, temp_parquet_path, _policy = read_source(
@@ -771,7 +835,7 @@ def process_file(
         frame = frame.rename(dict(zip(original_cols, sanitise(original_cols))))
 
         chosen_layout = detect_layout(frame, layout, year_col, value_col)
-        print(f"Info: Using layout '{chosen_layout}'.")
+        print("Info: Using layout '{}'.".format(chosen_layout))
 
         if chosen_layout == "wide":
             return process_wide_layout(
@@ -786,6 +850,7 @@ def process_file(
         if chosen_layout == "long":
             return process_long_layout(
                 frame=frame,
+                file_size=file_size,
                 id_var=id_var,
                 year_col_arg=year_col,
                 value_col_arg=value_col,
@@ -804,7 +869,7 @@ def process_file(
                 safe_mode=safe_mode,
             )
 
-        raise ValueError(f"Unsupported layout: {chosen_layout}")
+        raise ValueError("Unsupported layout: {}".format(chosen_layout))
     finally:
         if temp_parquet_path and os.path.exists(temp_parquet_path):
             try:
@@ -849,11 +914,11 @@ def preview_output(df: pl.DataFrame, rows: int = DEFAULT_PREVIEW_ROWS) -> None:
     export_df = prepare_export_df(df)
 
     print("\n=== Preview of export data ===")
-    print(f"Rows: {export_df.height}")
-    print(f"Columns: {len(export_df.columns)}")
+    print("Rows: {}".format(export_df.height))
+    print("Columns: {}".format(len(export_df.columns)))
     print("Column names:")
     print(", ".join(export_df.columns))
-    print(f"\nFirst {min(rows, export_df.height)} rows:")
+    print("\nFirst {} rows:".format(min(rows, export_df.height)))
     print(export_df.head(rows))
     print("=== End preview ===\n")
 
@@ -867,27 +932,33 @@ def write(
     min_free_ram_mb: int = DEFAULT_MIN_FREE_RAM_MB,
     safe_mode: bool = False,
 ) -> None:
-    output_path = f"{base}.{fmt}"
+    output_path = "{}.{}".format(base, fmt)
 
     if os.path.exists(output_path) and not overwrite:
-        print(f"Skipping {output_path}: file already exists. Use --overwrite.")
+        print("Skipping {}: file already exists. Use --overwrite.".format(output_path))
         return
 
     export_df = prepare_export_df(df)
     estimated_df_bytes = max(export_df.estimated_size(), 1)
 
-    if safe_mode and fmt in {"dta", "sav", "rdata"} and get_available_ram_mb() < max(
-        2048, min_free_ram_mb * 2
+    if (
+        safe_mode
+        and fmt == "rdata"
+        and get_available_ram_mb() < max(2048, min_free_ram_mb * 2)
     ):
         raise MemoryError(
-            f"Refusing export to {fmt} in --safe-mode: insufficient RAM for conversion."
+            "Refusing export to {} in --safe-mode: insufficient RAM for conversion.".format(
+                fmt
+            )
         )
 
     ensure_memory_headroom(
-        stage=f"export to {fmt}",
+        stage="export to {}".format(fmt),
         input_size_bytes=estimated_df_bytes,
         multiplier=3.0 if fmt == "rdata" else 1.5,
-        minimum_free_mb=max(min_free_ram_mb, 1024 if fmt == "rdata" else min_free_ram_mb),
+        minimum_free_mb=max(
+            min_free_ram_mb, 1024 if fmt == "rdata" else min_free_ram_mb
+        ),
         safe_mode=safe_mode,
     )
 
@@ -896,7 +967,9 @@ def write(
             try:
                 pyreadstat.write_dta(export_df, output_path, version=stata_version)
             except TypeError:
-                pyreadstat.write_dta(export_df.to_pandas(), output_path, version=stata_version)
+                pyreadstat.write_dta(
+                    export_df.to_pandas(), output_path, version=stata_version
+                )
         elif fmt == "sav":
             try:
                 pyreadstat.write_sav(export_df, output_path)
@@ -912,23 +985,34 @@ def write(
             finally:
                 del pdf
                 gc.collect()
+        elif fmt == "parquet":
+            export_df.write_parquet(output_path, compression="zstd")
         else:
-            raise ValueError(f"Unsupported output format: {fmt}")
+            raise ValueError("Unsupported output format: {}".format(fmt))
     except Exception as exc:
-        print(f"Error writing {output_path}: {exc}")
+        print("Error writing {}: {}".format(output_path, exc))
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "dtabnk: convert World Bank Open Data CSV/Excel files to panel datasets "
-            "in STATA (default), SPSS, and/or R formats."
+            "in STATA (default), SPSS, R, and/or Parquet formats."
         )
     )
     parser.add_argument("files", nargs="*", help="Input files (.csv, .xlsx, .xls).")
-    parser.add_argument("--sav", action="store_true", help="Output SPSS/PSPP .sav file.")
+    parser.add_argument(
+        "--sav", action="store_true", help="Output SPSS/PSPP .sav file."
+    )
     parser.add_argument("--rdata", action="store_true", help="Output R .RData file.")
-    parser.add_argument("--all", action="store_true", help="Output all available formats (STATA, SPSS, R).")
+    parser.add_argument(
+        "--parquet-out", action="store_true", help="Output Parquet .parquet file."
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Output all available formats (STATA, SPSS, R, Parquet).",
+    )
     parser.add_argument(
         "--out",
         nargs="*",
@@ -967,7 +1051,7 @@ def parse_args() -> argparse.Namespace:
         help="Specify STATA .dta version (11-15; default: 15).",
     )
     parser.add_argument(
-        "--threshold",
+        "--lazy",
         type=int,
         default=None,
         help="Size (MB) threshold to switch to lazy CSV processing (default: auto based on available RAM).",
@@ -998,7 +1082,9 @@ def parse_args() -> argparse.Namespace:
         "--preview-rows",
         type=int,
         default=DEFAULT_PREVIEW_ROWS,
-        help=f"Number of preview rows to display (default: {DEFAULT_PREVIEW_ROWS}).",
+        help="Number of preview rows to display (default: {}).".format(
+            DEFAULT_PREVIEW_ROWS
+        ),
     )
     parser.add_argument(
         "--delimiter",
@@ -1017,7 +1103,8 @@ def parse_args() -> argparse.Namespace:
         help="Overwrite existing output files without prompting.",
     )
     parser.add_argument(
-        "--license", "--licence",
+        "--license",
+        "--licence",
         dest="license",
         action="store_true",
         help="Print software licence information and exit.",
@@ -1038,7 +1125,9 @@ def main() -> None:
         )
 
     if args.out and len(args.out) != len(args.files):
-        raise SystemExit("Error: number of output files (--out) must match number of input files.")
+        raise SystemExit(
+            "Error: number of output files (--out) must match number of input files."
+        )
 
     if not 11 <= args.stata <= 15:
         raise SystemExit("Error: --stata must be between 11 and 15.")
@@ -1051,12 +1140,14 @@ def main() -> None:
 
     formats = ["dta"]
     if args.all:
-        formats = ["dta", "sav", "rdata"]
+        formats = ["dta", "sav", "rdata", "parquet"]
     else:
         if args.sav:
             formats.append("sav")
         if args.rdata:
             formats.append("rdata")
+        if args.parquet_out:
+            formats.append("parquet")
 
     for i, input_file in enumerate(args.files):
         try:
@@ -1067,7 +1158,7 @@ def main() -> None:
                 year_col=args.year_col,
                 value_col=args.value_col,
                 series_col=args.series_col,
-                lazy_thresh=args.threshold,
+                lazy_thresh=args.lazy,
                 parquet_thresh=args.parquet,
                 min_free_ram_mb=args.min_free_ram,
                 safe_mode=args.safe_mode,
@@ -1090,14 +1181,14 @@ def main() -> None:
                     safe_mode=args.safe_mode,
                 )
 
-            print(f"Done: {input_file}")
+            print("Done: {}".format(input_file))
             del df
             gc.collect()
         except MemoryError as exc:
-            print(f"Memory safety stop for {input_file}: {exc}")
+            print("Memory safety stop for {}: {}".format(input_file, exc))
             continue
         except Exception as exc:
-            print(f"Error processing {input_file}: {exc}")
+            print("Error processing {}: {}".format(input_file, exc))
             continue
 
 
