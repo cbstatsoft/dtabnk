@@ -102,6 +102,8 @@ def derive_memory_policy(
     lazy_thresh_mb: Optional[int] = None,
     parquet_thresh_mb: Optional[int] = None,
     safe_mode: bool = False,
+    reshape_heavy: bool = False,
+    multi_export: bool = False,
 ) -> Dict[str, Union[int, bool]]:
     avail_mb = get_available_ram_mb()
     file_mb = max(1, int(math.ceil(file_size_bytes / (1024 * 1024))))
@@ -109,13 +111,21 @@ def derive_memory_policy(
     dynamic_lazy_mb = (
         lazy_thresh_mb
         if lazy_thresh_mb is not None
-        else max(32, int(avail_mb * (0.05 if safe_mode else 0.10)))
+        else min(128, max(32, int(avail_mb * (0.05 if safe_mode else 0.08))))
     )
-    dynamic_parquet_mb = (
-        parquet_thresh_mb
-        if parquet_thresh_mb is not None
-        else max(64, int(avail_mb * (0.10 if safe_mode else 0.25)))
-    )
+
+    if parquet_thresh_mb is not None:
+        dynamic_parquet_mb = parquet_thresh_mb
+    else:
+        base_floor = 96 if safe_mode else 128
+        base_cap = 192 if (reshape_heavy or multi_export) else 256
+        ram_factor = 0.08 if safe_mode else 0.12
+        dynamic_parquet_mb = min(base_cap, max(base_floor, int(avail_mb * ram_factor)))
+
+        if reshape_heavy:
+            dynamic_parquet_mb = max(96, dynamic_parquet_mb - 32)
+        if multi_export:
+            dynamic_parquet_mb = max(96, dynamic_parquet_mb - 32)
 
     use_lazy = file_mb >= dynamic_lazy_mb
     use_parquet = file_mb >= dynamic_parquet_mb or avail_mb < (
@@ -282,6 +292,8 @@ def read_source(
     safe_mode: bool,
     delimiter: str,
     header_row_override: Optional[int],
+    reshape_heavy: bool = False,
+    multi_export: bool = False,
 ) -> Tuple[FrameLike, Optional[str], Dict[str, Union[int, bool]]]:
     ext = os.path.splitext(path)[1].lower()
     file_size = os.path.getsize(path)
@@ -294,6 +306,8 @@ def read_source(
         lazy_thresh_mb=lazy_thresh_mb,
         parquet_thresh_mb=parquet_thresh_mb,
         safe_mode=safe_mode,
+        reshape_heavy=reshape_heavy,
+        multi_export=multi_export,
     )
 
     print(
@@ -309,7 +323,7 @@ def read_source(
     use_parquet = bool(policy["use_parquet"])
     temp_parquet_path = None
 
-    if ext == ".csv" and use_parquet:
+    if ext == ".csv" and (use_parquet or use_lazy):
         print(
             "Large file ({:.1f} MB). Using streaming CSV -> Parquet intermediate...".format(
                 file_size / 1024 / 1024
@@ -599,6 +613,22 @@ def pivot_eager(
         )
 
 
+def should_allow_pivot(
+    frame: FrameLike,
+    fallback_bytes: int,
+    min_free_ram_mb: int,
+    safe_mode: bool,
+) -> bool:
+    est_bytes = estimate_frame_bytes(frame, fallback_bytes=fallback_bytes)
+    avail_mb = get_available_ram_mb()
+    reserve_mb = max(min_free_ram_mb, 1024 if safe_mode else min_free_ram_mb)
+    budget_mb = max(0, avail_mb - reserve_mb)
+    required_mb = int(
+        math.ceil((est_bytes * (3.5 if safe_mode else 3.0)) / (1024 * 1024))
+    )
+    return required_mb < max(256, int(budget_mb * (0.60 if safe_mode else 0.75)))
+
+
 def process_wide_layout(
     frame: FrameLike,
     file_size: int,
@@ -661,6 +691,17 @@ def process_wide_layout(
             raise MemoryError(
                 "Refusing pivot in --safe-mode: insufficient RAM headroom for eager pivot."
             )
+
+        if not should_allow_pivot(
+            frame=frame,
+            fallback_bytes=file_size,
+            min_free_ram_mb=min_free_ram_mb,
+            safe_mode=safe_mode,
+        ):
+            print(
+                "Info: Skipping eager pivot due to memory guard; keeping long-form panel."
+            )
+            return collect_frame(frame.rename({series_col: "Series"}))
 
         ensure_memory_headroom(
             stage="pivot",
@@ -738,6 +779,17 @@ def process_long_layout(
     frame = cast_year_and_value(frame, year_col="Year", value_col="Value")
 
     if "Series" in get_columns(frame):
+        if not should_allow_pivot(
+            frame=frame,
+            fallback_bytes=file_size,
+            min_free_ram_mb=min_free_ram_mb,
+            safe_mode=safe_mode,
+        ):
+            print(
+                "Info: Skipping eager pivot due to memory guard; keeping long-form panel."
+            )
+            return collect_frame(frame)
+
         ensure_memory_headroom(
             stage="pivot",
             input_size_bytes=estimate_frame_bytes(frame, fallback_bytes=file_size),
@@ -818,6 +870,8 @@ def process_file(
     safe_mode: bool,
     delimiter: str,
     header_row_override: Optional[int],
+    reshape_heavy: bool = False,
+    multi_export: bool = False,
 ) -> pl.DataFrame:
     file_size = os.path.getsize(path)
     frame, temp_parquet_path, _policy = read_source(
@@ -827,6 +881,8 @@ def process_file(
         safe_mode=safe_mode,
         delimiter=delimiter,
         header_row_override=header_row_override,
+        reshape_heavy=reshape_heavy,
+        multi_export=multi_export,
     )
 
     try:
@@ -923,7 +979,7 @@ def preview_output(df: pl.DataFrame, rows: int = DEFAULT_PREVIEW_ROWS) -> None:
 
 
 def write(
-    df: pl.DataFrame,
+    export_df: pl.DataFrame,
     base: str,
     fmt: str,
     stata_version: int,
@@ -937,7 +993,6 @@ def write(
         print("Skipping {}: file already exists. Use --overwrite.".format(output_path))
         return
 
-    export_df = prepare_export_df(df)
     estimated_df_bytes = max(export_df.estimated_size(), 1)
 
     if (
@@ -1119,9 +1174,7 @@ def main() -> None:
         raise SystemExit(0)
 
     if not args.files:
-        raise SystemExit(
-            "Error: no input files provided. Use -h to view help."
-        )
+        raise SystemExit("Error: no input files provided. Use -h to view help.")
 
     if args.out and len(args.out) != len(args.files):
         raise SystemExit(
@@ -1148,6 +1201,11 @@ def main() -> None:
         if args.parquet_out:
             formats.append("parquet")
 
+    multi_export = len(formats) > 1
+    reshape_heavy = (
+        args.layout in {"wide", "long", "year_rows"} or args.layout == "auto"
+    )
+
     for i, input_file in enumerate(args.files):
         try:
             df = process_file(
@@ -1163,15 +1221,18 @@ def main() -> None:
                 safe_mode=args.safe_mode,
                 delimiter=args.delimiter,
                 header_row_override=args.header_row,
+                reshape_heavy=reshape_heavy,
+                multi_export=multi_export,
             )
 
             if args.preview:
                 preview_output(df, rows=args.preview_rows)
 
+            export_df = prepare_export_df(df)
             base = args.out[i] if args.out else os.path.splitext(input_file)[0]
             for fmt in formats:
                 write(
-                    df=df,
+                    export_df=export_df,
                     base=base,
                     fmt=fmt,
                     stata_version=args.stata,
@@ -1181,6 +1242,7 @@ def main() -> None:
                 )
 
             print("Done: {}".format(input_file))
+            del export_df
             del df
             gc.collect()
         except MemoryError as exc:
