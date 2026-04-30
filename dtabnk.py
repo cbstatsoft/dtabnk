@@ -40,6 +40,10 @@ SERIES_ALIASES = [
     "indicator",
 ]
 
+HEADER_SERIES_PATTERN = re.compile(
+    r"((?:19|20)\d{2})(?:\s*\[YR(?:19|20)\d{2}\])?\s*-\s*(.+?)(?:\s*\[([A-Za-z0-9._]+)\])?\s*$"
+)
+
 LICENSE_TEXT = """GNU General Public Licence v3.0 or later
 
 This programme is free software: you can redistribute it and/or modify it under
@@ -266,6 +270,48 @@ def sanitise_one(name: str) -> str:
 
 def is_year_like(name: str) -> bool:
     return re.search(r"(19|20)\d{2}", str(name)) is not None
+
+
+def parse_header_series_column(name: str) -> Optional[Tuple[int, str, Optional[str]]]:
+    match = HEADER_SERIES_PATTERN.search(str(name).strip())
+    if not match:
+        return None
+
+    year = int(match.group(1))
+    series = match.group(2).strip()
+    series_code = match.group(3).strip() if match.group(3) else None
+    return year, series, series_code
+
+
+def detect_header_series_wide_layout(
+    frame: FrameLike,
+    raw_columns_by_name: Optional[Dict[str, str]] = None,
+) -> bool:
+    columns = get_columns(frame)
+    if len(columns) < 3:
+        return False
+
+    excluded = {
+        sanitise_one("Country Name"),
+        sanitise_one("Country Code"),
+        sanitise_one("Series Name"),
+        sanitise_one("Series Code"),
+        sanitise_one("Indicator Name"),
+        sanitise_one("Indicator Code"),
+    }
+
+    candidates = 0
+    matches = 0
+
+    for col in columns:
+        if col in excluded:
+            continue
+        raw_name = raw_columns_by_name.get(col, col) if raw_columns_by_name else col
+        candidates += 1
+        if parse_header_series_column(raw_name):
+            matches += 1
+
+    return matches >= 2 and matches >= max(2, int(candidates * 0.5))
 
 
 def read_excel_compat(path: str) -> pl.DataFrame:
@@ -549,9 +595,16 @@ def detect_layout(
     requested_layout: str,
     year_col: Optional[str],
     value_col: Optional[str],
+    raw_columns_by_name: Optional[Dict[str, str]] = None,
 ) -> str:
     if requested_layout != "auto":
         return requested_layout
+
+    if detect_header_series_wide_layout(
+        frame,
+        raw_columns_by_name=raw_columns_by_name,
+    ):
+        return "wide_header_series"
 
     year_hit = find_column_name(frame, [year_col] if year_col else YEAR_ALIASES)
     value_hit = find_column_name(frame, [value_col] if value_col else VALUE_ALIASES)
@@ -623,10 +676,121 @@ def should_allow_pivot(
     avail_mb = get_available_ram_mb()
     reserve_mb = max(min_free_ram_mb, 1024 if safe_mode else min_free_ram_mb)
     budget_mb = max(0, avail_mb - reserve_mb)
-    required_mb = int(
-        math.ceil((est_bytes * (3.5 if safe_mode else 3.0)) / (1024 * 1024))
-    )
+    required_mb = int(math.ceil((est_bytes * (3.5 if safe_mode else 3.0)) / (1024 * 1024)))
     return required_mb < max(256, int(budget_mb * (0.60 if safe_mode else 0.75)))
+
+
+def process_header_series_wide_layout(
+    frame: FrameLike,
+    file_size: int,
+    id_var: str,
+    min_free_ram_mb: int,
+    safe_mode: bool,
+    raw_columns_by_name: Optional[Dict[str, str]] = None,
+) -> pl.DataFrame:
+    actual_id_var = resolve_id_column(frame, id_var)
+
+    header_cols = []
+    for col in get_columns(frame):
+        if col == actual_id_var:
+            continue
+        raw_name = raw_columns_by_name.get(col, col) if raw_columns_by_name else col
+        if parse_header_series_column(raw_name):
+            header_cols.append(col)
+
+    if not header_cols:
+        raise ValueError(
+            "No header-encoded year/series columns found for wide_header_series layout."
+        )
+
+    frame = frame.select([actual_id_var] + header_cols)
+
+    estimated_unpivot_multiplier = max(2.0, min(8.0, len(header_cols) / 4))
+    ensure_memory_headroom(
+        stage="unpivot",
+        input_size_bytes=file_size,
+        multiplier=estimated_unpivot_multiplier,
+        minimum_free_mb=min_free_ram_mb,
+        safe_mode=safe_mode,
+    )
+
+    frame = frame.unpivot(
+        index=[actual_id_var],
+        on=header_cols,
+        variable_name="__Header__",
+        value_name="Value",
+    )
+
+    if raw_columns_by_name:
+        frame = frame.with_columns(
+            pl.col("__Header__")
+            .map_elements(
+                lambda value: raw_columns_by_name.get(value, value),
+                return_dtype=pl.Utf8,
+            )
+            .alias("__Raw_Header__")
+        )
+    else:
+        frame = frame.with_columns(pl.col("__Header__").alias("__Raw_Header__"))
+
+    frame = frame.with_columns(
+        [
+            pl.col("__Raw_Header__")
+            .str.extract(HEADER_SERIES_PATTERN.pattern, group_index=1)
+            .cast(pl.Int32, strict=False)
+            .alias("Year"),
+            pl.col("__Raw_Header__")
+            .str.extract(HEADER_SERIES_PATTERN.pattern, group_index=2)
+            .alias("Series"),
+            pl.col("__Raw_Header__")
+            .str.extract(HEADER_SERIES_PATTERN.pattern, group_index=3)
+            .alias("Series_Code"),
+        ]
+    ).drop(["__Header__", "__Raw_Header__"])
+
+    frame = cast_year_and_value(frame, year_col="Year", value_col="Value")
+
+    if not should_allow_pivot(
+        frame=frame,
+        fallback_bytes=file_size,
+        min_free_ram_mb=min_free_ram_mb,
+        safe_mode=safe_mode,
+    ):
+        print("Info: Skipping eager pivot due to memory guard; keeping long-form panel.")
+        ordered_cols = [actual_id_var, "Year", "Series", "Series_Code", "Value"]
+        ordered_cols = [col for col in ordered_cols if col in get_columns(frame)]
+        return collect_frame(frame.select(ordered_cols))
+
+    ensure_memory_headroom(
+        stage="pivot",
+        input_size_bytes=estimate_frame_bytes(frame, fallback_bytes=file_size),
+        multiplier=3.0 if safe_mode else 2.5,
+        minimum_free_mb=max(
+            min_free_ram_mb, 1024 if safe_mode else min_free_ram_mb
+        ),
+        safe_mode=safe_mode,
+    )
+
+    frame = frame.with_columns(
+        pl.when(pl.col("Series_Code").is_not_null() & (pl.col("Series_Code") != ""))
+        .then(
+            pl.concat_str(
+                [pl.col("Series"), pl.lit(" ["), pl.col("Series_Code"), pl.lit("]")]
+            )
+        )
+        .otherwise(pl.col("Series"))
+        .alias("Series_Key")
+    )
+
+    pivoted = pivot_eager(
+        frame=frame,
+        index=[actual_id_var, "Year"],
+        columns="Series_Key",
+        values="Value",
+        aggregate_function="mean",
+    )
+    pivoted = pivoted.rename(dict(zip(pivoted.columns, sanitise(pivoted.columns))))
+    return pivoted
 
 
 def process_wide_layout(
@@ -698,9 +862,7 @@ def process_wide_layout(
             min_free_ram_mb=min_free_ram_mb,
             safe_mode=safe_mode,
         ):
-            print(
-                "Info: Skipping eager pivot due to memory guard; keeping long-form panel."
-            )
+            print("Info: Skipping eager pivot due to memory guard; keeping long-form panel.")
             return collect_frame(frame.rename({series_col: "Series"}))
 
         ensure_memory_headroom(
@@ -785,9 +947,7 @@ def process_long_layout(
             min_free_ram_mb=min_free_ram_mb,
             safe_mode=safe_mode,
         ):
-            print(
-                "Info: Skipping eager pivot due to memory guard; keeping long-form panel."
-            )
+            print("Info: Skipping eager pivot due to memory guard; keeping long-form panel.")
             return collect_frame(frame)
 
         ensure_memory_headroom(
@@ -887,10 +1047,28 @@ def process_file(
 
     try:
         original_cols = get_columns(frame)
-        frame = frame.rename(dict(zip(original_cols, sanitise(original_cols))))
+        sanitised_cols = sanitise(original_cols)
+        raw_columns_by_name = dict(zip(sanitised_cols, original_cols))
+        frame = frame.rename(dict(zip(original_cols, sanitised_cols)))
 
-        chosen_layout = detect_layout(frame, layout, year_col, value_col)
+        chosen_layout = detect_layout(
+            frame,
+            layout,
+            year_col,
+            value_col,
+            raw_columns_by_name=raw_columns_by_name,
+        )
         print("Info: Using layout '{}'.".format(chosen_layout))
+
+        if chosen_layout == "wide_header_series":
+            return process_header_series_wide_layout(
+                frame=frame,
+                file_size=file_size,
+                id_var=id_var,
+                min_free_ram_mb=min_free_ram_mb,
+                safe_mode=safe_mode,
+                raw_columns_by_name=raw_columns_by_name,
+            )
 
         if chosen_layout == "wide":
             return process_wide_layout(
@@ -1079,9 +1257,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--layout",
-        choices=["auto", "wide", "long", "year_rows"],
+        choices=["auto", "wide", "wide_header_series", "long", "year_rows"],
         default="auto",
-        help="Specify input layout: auto, wide, long, or year_rows (default: auto).",
+        help="Specify input layout: auto, wide, wide_header_series, long, or year_rows (default: auto).",
     )
     parser.add_argument(
         "--year-col",
@@ -1174,7 +1352,9 @@ def main() -> None:
         raise SystemExit(0)
 
     if not args.files:
-        raise SystemExit("Error: no input files provided. Use -h to view help.")
+        raise SystemExit(
+            "Error: no input files provided. Use -h to view help."
+        )
 
     if args.out and len(args.out) != len(args.files):
         raise SystemExit(
@@ -1202,9 +1382,12 @@ def main() -> None:
             formats.append("parquet")
 
     multi_export = len(formats) > 1
-    reshape_heavy = (
-        args.layout in {"wide", "long", "year_rows"} or args.layout == "auto"
-    )
+    reshape_heavy = args.layout in {
+        "wide",
+        "wide_header_series",
+        "long",
+        "year_rows",
+    } or args.layout == "auto"
 
     for i, input_file in enumerate(args.files):
         try:
