@@ -100,7 +100,7 @@ dtabnk huge_data.xlsx --parquet 500 --all
 
 # View licence information
 dtabnk --license
-
+```
 ---
 
 (C) 2026 Connor Baird
