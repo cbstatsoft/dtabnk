@@ -1,6 +1,4 @@
-#!/usr/bin/env python3
-# (C) Connor Baird 2026
-# GNU GPL-3.0-or-later
+!/usr/bin/env python3
 
 from __future__ import annotations
 
