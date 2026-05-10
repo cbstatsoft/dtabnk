@@ -92,7 +92,7 @@ The following run options are available for `dtabnk`:
 
 ```bash
 # Display help information
-dtabnk
+dtabnk -h
 
 # Convert a single CSV to STATA format
 dtabnk data.csv
