@@ -1,8 +1,8 @@
 # dtabnk
 
-[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
-[![Licence](https://img.shields.io/badge/licence-GPL%20v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.html)
-[![Polars](https://img.shields.io/badge/polars-fast-green.svg)](https://www.pola.rs/)
+[![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![GPL-3.0-or-later](https://img.shields.io/badge/licence-GPL--3.0--or--later-A42E2B?logo=gnu&logoColor=white)](LICENSE)
+[![Polars 1.0+](https://img.shields.io/badge/Polars-1.0%2B-CD792C?logo=polars&logoColor=white)](https://pola.rs/)
 
 `dtabnk` is a memory-aware command-line tool for converting **World Bank Open Data CSV and Excel files into panel datasets**.
 
