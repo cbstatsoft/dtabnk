@@ -1537,6 +1537,189 @@ def polars_to_pandas(data: pl.DataFrame):
 
 
 # ---------------------------------------------------------------------------
+# Panel merging
+# ---------------------------------------------------------------------------
+
+
+class PanelMerger:
+    """Combine normalised panels without silent many-to-many joins or data loss."""
+
+    def __init__(
+        self,
+        keys: Sequence[str],
+        how: str = "outer",
+        conflicts: str = "suffix",
+        minimum_free_ram_mb: int = DEFAULT_MIN_FREE_RAM_MB,
+        safe_mode: bool = False,
+    ) -> None:
+        self.keys = list(keys)
+        self.how = how
+        self.conflicts = conflicts
+        self.minimum_free_ram_mb = minimum_free_ram_mb
+        self.safe_mode = safe_mode
+
+        if not self.keys or len({key.lower() for key in self.keys}) != len(self.keys):
+            raise ValueError("Merge keys must be non-empty and unique.")
+        if self.how not in {"outer", "inner", "left"}:
+            raise ValueError("Unsupported merge type: {}".format(self.how))
+        if self.conflicts not in {"suffix", "error"}:
+            raise ValueError("Unsupported merge conflict policy: {}".format(self.conflicts))
+
+    def _validate_keys(self, frame: pl.DataFrame, path: str) -> pl.DataFrame:
+        missing = [key for key in self.keys if key not in frame.columns]
+        if missing:
+            raise ValueError(
+                "{}: missing merge column(s) {}. Available: {}. "
+                "Use --merge-on to select different keys, or check whether "
+                "the source was kept in long form.".format(
+                    path, ", ".join(missing), ", ".join(frame.columns)
+                )
+            )
+
+        # Harmonise entity IDs as trimmed strings and Year as an integer.
+        # Do not silently treat null or blank IDs as a valid join group.
+        expressions = []
+        for key in self.keys:
+            if key == "Year":
+                expressions.append(
+                    pl.col(key).cast(pl.Int32, strict=True).alias(key)
+                )
+            else:
+                expressions.append(
+                    pl.col(key).cast(pl.Utf8, strict=True)
+                    .str.strip_chars().alias(key)
+                )
+        frame = frame.with_columns(expressions)
+
+        invalid = pl.any_horizontal(
+            [
+                pl.col(key).is_null()
+                if key == "Year"
+                else (pl.col(key).is_null() | (pl.col(key) == ""))
+                for key in self.keys
+            ]
+        )
+        invalid_count = frame.filter(invalid).height
+        if invalid_count:
+            raise ValueError(
+                "{}: {} row(s) have missing or blank merge keys {}. "
+                "Correct or filter these records before merging.".format(
+                    path, invalid_count, ", ".join(self.keys)
+                )
+            )
+
+        duplicate_count = int(frame.select(self.keys).is_duplicated().sum())
+        if duplicate_count:
+            examples = (
+                frame.filter(pl.struct(self.keys).is_duplicated())
+                .select(self.keys)
+                .head(3)
+                .to_dicts()
+            )
+            raise ValueError(
+                "{}: {} row(s) have duplicate merge keys {} (examples: {}). "
+                "A many-to-many merge is unsafe; include additional keys "
+                "using --merge-on, or resolve duplicates in the source.".format(
+                    path, duplicate_count, ", ".join(self.keys), examples
+                )
+            )
+        return frame
+
+    @staticmethod
+    def _unique_name(requested: str, used: Set[str]) -> str:
+        proposed = sanitise_one(requested)
+        if proposed.lower() not in used:
+            return proposed
+
+        counter = 2
+        while True:
+            suffix = "_{}".format(counter)
+            candidate = "{}{}".format(
+                proposed[: STATISTICAL_NAME_MAX_LENGTH - len(suffix)].rstrip("_"),
+                suffix,
+            )
+            if candidate.lower() not in used:
+                return candidate
+            counter += 1
+
+    def _name_columns(
+        self, frame: pl.DataFrame, source_path: str, existing: Set[str]
+    ) -> pl.DataFrame:
+        label = sanitise_one(os.path.splitext(os.path.basename(source_path))[0])
+        measures = [col for col in frame.columns if col not in self.keys]
+        used = set(existing)
+        renamed = {}
+
+        for column in measures:
+            # One-indicator World Bank files ordinarily have a generic Value
+            # column. Give it the source's name to make merged output usable.
+            if column == "Value":
+                proposed = label if len(measures) == 1 else "Value_{}".format(label)
+            else:
+                proposed = column
+
+            first_choice = sanitise_one(proposed)
+            if first_choice.lower() in used:
+                if self.conflicts == "error":
+                    raise ValueError(
+                        "{}: column '{}' conflicts with an existing merge "
+                        "column. Rename the input or use "
+                        "--merge-conflicts suffix.".format(source_path, column)
+                    )
+                proposed = "{}_{}".format(column, label)
+
+            unique_name = self._unique_name(proposed, used)
+            used.add(unique_name.lower())
+            if unique_name != column:
+                renamed[column] = unique_name
+
+        return frame.rename(renamed) if renamed else frame
+
+    def add(
+        self,
+        combined: Optional[pl.DataFrame],
+        data: pl.DataFrame,
+        source_path: str,
+    ) -> pl.DataFrame:
+        frame = self._validate_keys(Exporter.prepare(data), source_path)
+        existing = (
+            {name.lower() for name in combined.columns}
+            if combined is not None
+            else {key.lower() for key in self.keys}
+        )
+        frame = self._name_columns(frame, source_path, existing)
+
+        if combined is None:
+            print(
+                "Merge base: {} ({} rows, {} columns).".format(
+                    source_path, frame.height, frame.width
+                )
+            )
+            return frame
+
+        MemoryManager.ensure_headroom(
+            stage="panel merge",
+            input_size_bytes=max(1, combined.estimated_size() + frame.estimated_size()),
+            multiplier=3.5 if self.safe_mode else 2.5,
+            minimum_free_mb=self.minimum_free_ram_mb,
+            safe_mode=self.safe_mode,
+        )
+
+        merged = combined.join(
+            frame,
+            on=self.keys,
+            how="full" if self.how == "outer" else self.how,
+            validate="1:1",
+            coalesce=True,
+        )
+        print(
+            "Merge {}: {} + {} rows -> {} rows ({})".format(
+                self.how, combined.height, frame.height, merged.height, source_path
+            )
+        )
+        return merged
+
+# ---------------------------------------------------------------------------
 # Command-line interface
 # ---------------------------------------------------------------------------
 
@@ -1559,6 +1742,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_layout_arguments(parser)
     add_memory_arguments(parser)
     add_input_arguments(parser)
+    add_merge_arguments(parser)
 
     parser.add_argument(
         "--overwrite",
@@ -1639,6 +1823,33 @@ def add_layout_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_merge_arguments(parser: argparse.ArgumentParser) -> None:
+    group = parser.add_argument_group("merge")
+    group.add_argument(
+        "--merge",
+        action="store_true",
+        help="Merge two or more input panels into one output rather than exporting each.",
+    )
+    group.add_argument(
+        "--merge-on",
+        nargs="+",
+        metavar="COLUMN",
+        default=["Country", "Year"],
+        help="One or more merge keys (default: Country Year).",
+    )
+    group.add_argument(
+        "--merge-how",
+        choices=["outer", "inner", "left"],
+        default="outer",
+        help="Merge type: outer (default), inner, or left.",
+    )
+    group.add_argument(
+        "--merge-conflicts",
+        choices=["suffix", "error"],
+        default="suffix",
+        help="When indicator names overlap, suffix with the source name (default) or fail.",
+    )
+
 def add_memory_arguments(parser: argparse.ArgumentParser) -> None:
     group = parser.add_argument_group("memory")
     group.add_argument(
@@ -1710,7 +1921,19 @@ def validate_args(args: argparse.Namespace) -> None:
     if not args.files:
         raise SystemExit("Error: no input files provided. Use -h to view help.")
 
-    if args.out and len(args.out) != len(args.files):
+    if args.merge and len(args.files) < 2:
+        raise SystemExit("Error: --merge requires at least two input files.")
+
+    if args.merge:
+        if args.out is not None and len(args.out) != 1:
+            raise SystemExit("Error: --merge accepts exactly one --out name.")
+        names = [
+            "Country" if sanitise_one(key) == "Country_Name" else sanitise_one(key)
+            for key in args.merge_on
+        ]
+        if len(set(name.lower() for name in names)) != len(names):
+            raise SystemExit("Error: --merge-on contains duplicate keys.")
+    elif args.out and len(args.out) != len(args.files):
         raise SystemExit(
             "Error: number of output files (--out) must match number of input files."
         )
@@ -1787,7 +2010,80 @@ def make_transform_options(args: argparse.Namespace) -> TransformOptions:
     )
 
 
+def process_merged_inputs(args: argparse.Namespace) -> int:
+    """Process files one at a time, joining only validated normalised panels."""
+    formats = output_formats(args)
+    pipeline = PanelPipeline(
+        make_read_options(args, multi_export=len(formats) > 1),
+        make_transform_options(args),
+    )
+    exporter = Exporter(
+        stata_version=args.stata,
+        overwrite=args.overwrite,
+        minimum_free_ram_mb=args.min_free_ram,
+        safe_mode=args.safe_mode,
+    )
+    keys = [
+        "Country" if sanitise_one(key) == "Country_Name" else sanitise_one(key)
+        for key in args.merge_on
+    ]
+    merger = PanelMerger(
+        keys=keys,
+        how=args.merge_how,
+        conflicts=args.merge_conflicts,
+        minimum_free_ram_mb=args.min_free_ram,
+        safe_mode=args.safe_mode,
+    )
+    combined = None
+
+    try:
+        for path in args.files:
+            data = pipeline.process(path)
+            try:
+                updated = merger.add(combined, data, path)
+            finally:
+                del data
+            if combined is not None:
+                del combined
+            combined = updated
+            gc.collect()
+
+        if combined is None:
+            raise ValueError("No datasets were available for merging.")
+
+        if args.preview:
+            exporter.preview(combined, rows=args.preview_rows)
+
+        base = (
+            args.out[0]
+            if args.out
+            else os.path.join(
+                os.path.dirname(os.path.abspath(args.files[0])), "merged_panel"
+            )
+        )
+        export_data = exporter.prepare(combined)
+        failures = 0
+        for file_format in formats:
+            try:
+                exporter.write(export_data, base, file_format)
+            except Exception as exc:
+                print("Error exporting merged panel as {}: {}".format(file_format, exc))
+                failures += 1
+        if not failures:
+            print("Done: merged {} input files.".format(len(args.files)))
+        return failures
+    except (Exception, MemoryError) as exc:
+        print("Error merging input files: {}".format(exc))
+        return 1
+    finally:
+        if combined is not None:
+            del combined
+        gc.collect()
+
 def process_inputs(args: argparse.Namespace) -> int:
+    if args.merge:
+        return process_merged_inputs(args)
+
     formats = output_formats(args)
     read_options = make_read_options(args, multi_export=len(formats) > 1)
     transform_options = make_transform_options(args)
