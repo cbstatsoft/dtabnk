@@ -14,6 +14,7 @@ It supports Stata `.dta` output by default, with optional SPSS/PSPP `.sav`, R `.
 
 - **Multiple input formats**: reads `.csv`, `.xlsx`, and `.xls` files.
 - **Multiple output formats**: writes Stata `.dta` by default, with optional SPSS/PSPP `.sav`, R `.RData`, and Parquet `.parquet` output.
+- **Validated multi-file merging**: combine indicator panels by country and year, with one-to-one validation, join choices and collision-safe names.
 - **Automatic layout detection**: detects `wide`, `wide_header_series`, `long`, and `year_rows` inputs.
 - **Flexible entity mapping**: supports a custom entity column through `--id`, with fallback between common country-column names where possible.
 - **Standardised export shape**: renames `Country_Name` to `Country` and standardises the time column as `Year` before export.
@@ -110,7 +111,11 @@ Core dependencies are checked at startup. Other dependencies, including Excel re
 | `--rdata` | Add R `.RData` output. |
 | `--parquet-out` | Add Parquet `.parquet` output. |
 | `--all` | Output Stata, SPSS/PSPP, R, and Parquet formats. |
-| `--out` | Specify output base name(s). The number of names must match the number of input files. |
+| `--out` | Specify output base name(s). In merge mode, specify exactly one base name. |
+| `--merge` | Merge two or more input panels into one dataset. |
+| `--merge-on` | Merge keys, default `Country Year`. |
+| `--merge-how` | Join type: `outer` (default), `inner`, or `left`. |
+| `--merge-conflicts` | `suffix` (default) or `error` for colliding indicator names. |
 | `--id` | Entity ID column name. Default: `Country_Name`. |
 | `--layout` | Input layout: `auto`, `wide`, `wide_header_series`, `long`, or `year_rows`. Default: `auto`. |
 | `--year-col` | Year column name for `long` or `year_rows` layouts. |
@@ -129,6 +134,24 @@ Core dependencies are checked at startup. Other dependencies, including Excel re
 | `--licence`, `--license` | Print software licence information and exit. |
 
 Stata output is always included unless the command exits before conversion. `--sav`, `--rdata`, and `--parquet-out` add those formats to the default `.dta` output; use `--all` to request every supported output format at once.
+
+## Merge multiple World Bank files
+
+Convert and merge several indicator exports into a single country-year panel:
+
+```bash
+dtabnk gdp.csv life_expectancy.csv population.xlsx --merge --out development_panel
+```
+
+The default is a full outer merge on `Country` and `Year`. Choose `--merge-how inner` to keep only shared observations, or `--merge-how left` to keep keys from the first file. Use `--merge-on` to specify other normalised key columns.
+
+A single generic `Value` column is named after its source file, e.g. `gdp.csv` becomes `gdp`. Overlapping indicator names gain a source-specific suffix, or fail with `--merge-conflicts error`.
+
+Merging validates join keys and **rejects missing keys and duplicates** before joining. This prevents silent many-to-many row expansion. An outer merge retains missing combinations as null values, never zero. By default the combined output is called `merged_panel.dta` beside the first input. As with individual exports, `--overwrite` is needed to replace existing files.
+
+If normalisation leaves multiple series as long-form rows per country-year, a merge on country/year will fail its duplicate check. Pivot the source or explicitly specify additional shared keys as appropriate.
+
+Run merge regression tests with `python -m pytest -q` after installing dependencies.
 
 ## Example Usage
 
